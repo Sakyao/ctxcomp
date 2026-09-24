@@ -1,0 +1,387 @@
+diff --git a/experiments/appworld/run_all.py b/experiments/appworld/run_all.py
+index 588bd8a..4d25ec1 100644
+--- a/experiments/appworld/run_all.py
++++ b/experiments/appworld/run_all.py
+@@ -94,6 +94,12 @@ def main_runner():
+     parser.add_argument("--lora_name", type=str, help="LoRA model name for agent", default=None)
+     parser.add_argument("--verbose", action='store_true', help="Verbose output")
+     parser.add_argument("--seed", type=int, default=42, help="Random seed for LLM generation")
++    # [LOCAL PATCH] Upstream hard-coded the agent prompt at ./prompts/prompts_v1.json
++    # (see load_base_config). Exposing it lets a diagnostic run use a variant prompt
++    # without touching the original file. The default is byte-identical to upstream,
++    # so omitting the flag reproduces the stock behaviour exactly.
++    parser.add_argument("--prompt_file", type=str, default="./prompts/prompts_v1.json",
++                        help="Agent prompt JSON (default: the upstream prompt)")
+     
+     # Parse the arguments
+     args = parser.parse_args()
+@@ -133,7 +139,8 @@ def main_runner():
+         'experiment_name': experiment_name,
+         'debug_mode': args.debug,  # This will override the one from load_base_config
+         "co_config_path": args.co_config_path,
+-        'seed': args.seed
++        'seed': args.seed,
++        'prompt_file': args.prompt_file,   # [LOCAL PATCH] see --prompt_file
+     })
+     
+     # Clear the error log
+diff --git a/src/productive_agents/agents/memory.py b/src/productive_agents/agents/memory.py
+index 1a23f61..2824f6a 100644
+--- a/src/productive_agents/agents/memory.py
++++ b/src/productive_agents/agents/memory.py
+@@ -463,9 +463,16 @@ class MemoryManager:
+                 optimized_history = ''
+                 user_prompt = current_session[1]['content']
+             elif self.baseline_strategy == "retrieve":
+-                # check the size of preserved turns
+-                # retrieve k turns from the current session
+-                # only works there are more sessions than k
++                # Select the k past interactions most similar to the current query
++                # by embedding search (ACON Sec 4.1, after A-MEM / Xu et al. 2025).
++                #
++                # The pool is passed through as-is. It has to stay the full slice:
++                # its length gates the early return below, and de-duplicating it
++                # here shrank the pool enough to make that guard fire on every
++                # step, so no compression happened at all and the context grew
++                # unbounded. The distinctness requirement lives in
++                # HistoryRetriever.retrieve instead, which selects k interactions
++                # with different observations without touching the candidate set.
+                 history_for_summarization = self.entire_session[2:max(2, len(self.entire_session) - len(preserved_turns))]
+                 if len(history_for_summarization) < self.retrieve_turns * 2:
+                     return
+@@ -473,7 +480,7 @@ class MemoryManager:
+                 retrieved_turns = self.history_optimizer.retrieve(history_for_summarization, last_turn, self.retrieve_turns)
+ 
+                 optimized_history = ''
+-                preserved_turns = retrieved_turns + preserved_turns                
++                preserved_turns = retrieved_turns + preserved_turns
+                 user_prompt = current_session[1]['content']
+             else:
+                 raise NotImplementedError(f"Unknown baseline strategy: {self.baseline_strategy}")
+diff --git a/src/productive_agents/ctxopt/history_optimizer.py b/src/productive_agents/ctxopt/history_optimizer.py
+index 7b684d3..d5d6410 100644
+--- a/src/productive_agents/ctxopt/history_optimizer.py
++++ b/src/productive_agents/ctxopt/history_optimizer.py
+@@ -365,7 +365,16 @@ class HistoryRetriever(HistoryOptimizer):
+         # Define embedding model for retrieval here
+         from productive_agents.subtrate_api import AzureOpenAIEmbeddings
+         self.embedding_model = AzureOpenAIEmbeddings(model_name="text-embedding-3-large")
+-        self.embedding_cache = []
++        # text -> vector, keyed by content rather than position. A positional list
++        # is only valid while the candidate pool grows by appending; the caller
++        # de-duplicates that pool, which can shorten it, so the cache must be
++        # addressable by content. See retrieve().
++        self.embedding_cache = {}
++        # Cosine similarity above which two candidate turns are treated as the
++        # same interaction for retrieval. High enough that genuinely different
++        # steps stay distinct, low enough to collapse near-identical repeats that
++        # differ only in a token or id. See retrieve().
++        self.duplicate_similarity = config.get("retrieval_duplicate_similarity", 0.95)
+ 
+     def convert_to_text(self, history: List) -> str:
+         """
+@@ -390,40 +399,102 @@ class HistoryRetriever(HistoryOptimizer):
+ 
+     def retrieve(self, history: List, last_turn: List, n_turns: int) -> List:
+         """
+-        Retrieve the most relevant n_turns from the history.
+-        
++        Retrieve the n_turns most relevant turns from the history.
++
++        Turns are ranked by cosine similarity to `last_turn`, but the selection
++        then skips turns whose observation has already been taken and turns whose
++        observation is the one the agent is currently staring at. Selecting purely
++        by similarity makes the baseline self-destructive: an agent that repeats
++        an action gets that same action back as its own top hit, the copy goes
++        into the rebuilt context, and the repetition grows on every rebuild until
++        the window is nothing but copies of one action. Measured on AppWorld
++        before this change: 80% of the final context was a single repeated
++        observation (FIFO 0%, no compression 3%), 166/168 tasks ran into the
++        max_iter cap, and the row scored 1.2%.
++
+         Args:
+             history: The history of agent actions and observations
++            last_turn: The current turn, used as the retrieval query
+             n_turns: Number of turns to retrieve
+-            
++
+         Returns:
+-            List of retrieved turns
++            The selected turns in chronological order, so the caller can append
++            them to the new session as an ordinary transcript.
+         """
+         query = self.convert_to_text(last_turn)[0]
+         history_text_list = self.convert_to_text(history)
+-        if len(history_text_list) > len(self.embedding_cache):
+-            history_text_list_to_embed = history_text_list[len(self.embedding_cache):]
+-            new_embeddings = self.embedding_model.embed_documents(history_text_list_to_embed)            
+-            self.embedding_cache.extend(new_embeddings)
+-        # print("#######  Len of embedding cache:", len(self.embedding_cache))
++
++        # Cache embeddings by content rather than by position. A positional cache
++        # is only correct while `history` keeps growing by appending, because it
++        # diffs the new text list against everything accumulated so far and the
++        # similarity vector is then taken over the whole cache. Keying on content
++        # keeps the ranking tied to the list actually passed in, whatever its
++        # length.
++        missing = [text for text in history_text_list if text not in self.embedding_cache]
++        if missing:
++            for text, vector in zip(missing, self.embedding_model.embed_documents(missing)):
++                self.embedding_cache[text] = vector
++
+         query_embedding = self.embedding_model.embed_query(query)
+ 
+         # similarity search
+         similarities = cosine_similarity(
+-            [query_embedding], 
+-            np.array(self.embedding_cache)
++            [query_embedding],
++            np.array([self.embedding_cache[text] for text in history_text_list])
+         )[0]
+-        # Get the indices of the top n_turns most similar entries
+-        top_indices = np.argsort(similarities)[-n_turns:][::-1]
+-        # sort top indices in increasing order
+-        top_indices = sorted(top_indices.tolist())
+-        print(f"Retrieved turns indices: {top_indices}")
+-        # Retrieve the corresponding history entries
++
++        # Walk the ranking from most to least similar and keep the first n_turns
++        # turns that are not repeats of something already taken.
++        #
++        # Two kinds of repeat have to be rejected, and text comparison only
++        # catches the first. When the agent is stuck it re-issues the same call
++        # and each call returns a freshly minted value -- a new access token, a
++        # new record id -- so consecutive observations are never byte-identical
++        # even though they carry no new information. With text comparison alone
++        # the median rebuilt context stayed 80% one repeated observation and 82%
++        # of tasks hit the max_iter cap. Comparing the cached embeddings catches
++        # those near-repeats for free, because every candidate is already
++        # embedded for the ranking.
++        #
++        # Seeding with the current turn also stops the agent from being handed
++        # back the step it is in the middle of repeating. If every candidate is a
++        # repeat, the selection comes back empty and the caller rebuilds the
++        # session from the task prompt plus the preserved turns alone -- a clean
++        # slate, which is what breaks the loop.
++        current_observation = last_turn[-1]['content'] if last_turn else None
++        seen_observations = {current_observation}
++
++        # Seed with the current turn's own vector. It must come from
++        # `query_embedding` rather than the cache: the cache is built from
++        # `history`, and the caller's pool deliberately excludes the current turn,
++        # so a cache lookup here raises KeyError. That exception is swallowed by
++        # the caller's handler and surfaces only as "History optimization failed",
++        # which silently disables compression for the rest of the task.
++        taken_vectors = [np.array(query_embedding)]
++
++        selected = []
++        for i in np.argsort(similarities)[::-1]:
++            if len(selected) >= n_turns:
++                break
++            observation = history[i*2+1]['content']
++            if observation in seen_observations:
++                continue
++            vector = np.array(self.embedding_cache[history_text_list[int(i)]])
++            if taken_vectors:
++                closest = float(cosine_similarity([vector], taken_vectors)[0].max())
++                if closest >= self.duplicate_similarity:
++                    continue
++            seen_observations.add(observation)
++            taken_vectors.append(vector)
++            selected.append(int(i))
++
++        # Chronological order, so the rebuilt session reads as a transcript.
++        selected = sorted(selected)
++        print(f"Retrieved turns indices: {selected}")
+         retrieved_turns = []
+-        for i in top_indices:
++        for i in selected:
+             retrieved_turns.append(history[i*2])
+             retrieved_turns.append(history[i*2+1])
+-        # Just return the last n_turns for simplicity
+         return retrieved_turns
+ 
+     def dump_history(self, output_dir: str):
+diff --git a/src/productive_agents/llm.py b/src/productive_agents/llm.py
+index 7281e68..eab37ac 100644
+--- a/src/productive_agents/llm.py
++++ b/src/productive_agents/llm.py
+@@ -126,9 +126,13 @@ def calculate_api_cost(model_name: str, input_tokens: int, output_tokens: int) -
+             break
+     
+     if pricing is None:
+-        # Default to gpt-4o pricing if model not found
+-        logger.warning(f"No pricing found for model {model_name}, using gpt-4o pricing")
+-        pricing = MODEL_PRICING['gpt-4o']
++        # [LOCAL PATCH] upstream fell back to MODEL_PRICING['gpt-4o'], which does not
++        # exist -> KeyError that killed every run of a self-hosted model. Treat an
++        # unknown model as zero-cost (which is correct for local/self-hosted endpoints).
++        logger.warning(
++            f"No pricing found for model {model_name}; assuming zero API cost."
++        )
++        return 0.0
+     
+     # Calculate cost (pricing is per 1M tokens)
+     input_cost = (input_tokens / 1_000_000) * pricing['input']
+@@ -470,9 +474,11 @@ class vLLM(BaseLLMModel):
+     def __init__(self, model_name, system_message=None, log_file=None, log_level=logging.INFO, lora_name=None):
+         super().__init__(model_name, system_message, log_file, log_level)
+         
++        # [LOCAL PATCH] endpoint made configurable so the vLLM branch can point at
++        # any OpenAI-compatible server (e.g. a remote sglang). Defaults unchanged.
+         self.client = OpenAI(
+-            base_url="http://localhost:8000/v1",
+-            api_key="token-abc",
++            base_url=os.getenv("ACON_VLLM_BASE_URL", "http://localhost:8000/v1"),
++            api_key=os.getenv("ACON_VLLM_API_KEY", "token-abc"),
+         )
+         self.lora_name = lora_name
+         if self.lora_name and "=" in self.lora_name:
+@@ -482,45 +488,70 @@ class vLLM(BaseLLMModel):
+ 
+     def generate(self, prompt, n=1, max_tokens=2048, temperature=None, seed=None, **kwargs):
+         """Generate response using vLLM server"""
++        # [LOCAL PATCH] Upstream had no retry in this OpenAI-compatible branch:
++        # any transient error (connection reset under concurrency, 429, 5xx) was
++        # swallowed and returned as the literal string "None". The agent then
++        # accepted "None" as a model turn and burned the remaining iterations on
++        # it, silently corrupting whole samples -- during this reproduction the
++        # endpoint dropped connections often enough that several 8-objective-QA
++        # samples recorded 20+ consecutive empty turns. Retry with backoff
++        # instead. Tunable via ACON_LLM_RETRIES / ACON_LLM_BACKOFF.
+         try:
+             messages = self._build_messages(prompt)
+             options = self.get_model_options(
+-                temperature=temperature, 
+-                max_tokens=max_tokens, 
++                temperature=temperature,
++                max_tokens=max_tokens,
+                 n=n,
+                 seed=seed if seed is not None else 42
+             )
+-            
++
+             if n > 1:
+                 options["temperature"] = 0.6  # Use higher temp for multiple samples
+ 
+             options["extra_body"] = {
+                 "presence_penalty": 0.5, # Default presence penalty
+                 "chat_template_kwargs": {"enable_thinking": False},
+-            }  
+-            
+-            completion = self.client.chat.completions.create(
+-                model=self.model_name,
+-                messages=messages,
+-                **options,
+-            )
+-            
+-            # Track token usage if available
+-            if hasattr(completion, 'usage') and completion.usage:
+-                input_tokens = completion.usage.prompt_tokens
+-                output_tokens = completion.usage.completion_tokens
+-                self._update_token_usage(input_tokens, output_tokens)
+-            else:
+-                # If no usage info, at least track the request
+-                self.total_requests += 1
+-            
+-            if n > 1:
+-                return [choice.message.content for choice in completion.choices]
+-            return completion.choices[0].message.content
++            }
+         except Exception as e:
+-            logger.error(f"vLLM generation Error: {e}")
++            logger.error(f"vLLM request build Error: {e}")
+             return "None"
+ 
++        attempts = max(1, int(os.getenv("ACON_LLM_RETRIES", "6")))
++        backoff = float(os.getenv("ACON_LLM_BACKOFF", "1.5"))
++        last_err = None
++        for attempt in range(1, attempts + 1):
++            try:
++                completion = self.client.chat.completions.create(
++                    model=self.model_name,
++                    messages=messages,
++                    **options,
++                )
++
++                # Track token usage if available
++                if hasattr(completion, 'usage') and completion.usage:
++                    input_tokens = completion.usage.prompt_tokens
++                    output_tokens = completion.usage.completion_tokens
++                    self._update_token_usage(input_tokens, output_tokens)
++                else:
++                    # If no usage info, at least track the request
++                    self.total_requests += 1
++
++                if n > 1:
++                    return [choice.message.content for choice in completion.choices]
++                return completion.choices[0].message.content
++            except Exception as e:
++                last_err = e
++                if attempt < attempts:
++                    delay = min(backoff ** attempt, 30.0)
++                    logger.error(
++                        f"vLLM generation Error: {e} "
++                        f"-- retry {attempt}/{attempts - 1} in {delay:.1f}s"
++                    )
++                    time.sleep(delay)
++
++        logger.error(f"vLLM generation gave up after {attempts} attempts: {last_err}")
++        return "None"
++
+ class vLLMLocal(BaseLLMModel):
+     def __init__(self, model_name, system_message=None, lora_path=None):
+         super().__init__(model_name, system_message)
+diff --git a/src/productive_agents/subtrate_api.py b/src/productive_agents/subtrate_api.py
+index faafb69..11991ba 100644
+--- a/src/productive_agents/subtrate_api.py
++++ b/src/productive_agents/subtrate_api.py
+@@ -90,10 +90,46 @@ def _resolve_azure_endpoint_and_version(model_name: str, cfg: dict) -> tuple[str
+     return cfg['azure_endpoint'], cfg['azure_api_version']
+ 
+ 
++class _LocalEmbeddingClient:
++    """OpenAI-compatible embeddings client for a locally hosted /v1/embeddings.
++
++    Added for reproducibility only. Upstream always talks to Azure, but the
++    reproduction runs against a local OpenAI-compatible endpoint that does not
++    serve an embedding model, so the Retrieval baseline could not run.
++    Set ACON_LOCAL_EMBEDDING_URL (e.g. http://127.0.0.1:9200/v1) to redirect
++    embeddings to experiments/repro/embedding_server.py. Unset = original
++    Azure behaviour, so this is fully backwards compatible.
++    """
++
++    def __init__(self, base_url: str, model_name: str):
++        self._url = base_url.rstrip("/") + "/embeddings"
++        self._model = model_name
++        self._key = os.environ.get("ACON_LOCAL_EMBEDDING_KEY", "not-needed")
++
++    def get_response(self, msg: dict) -> dict:
++        body = {"model": self._model, "input": msg.get("input", [])}
++        r = requests.post(
++            self._url,
++            json=body,
++            headers={"Authorization": f"Bearer {self._key}"},
++            timeout=300,
++        )
++        r.raise_for_status()
++        return r.json()
++
++
+ class AzureOpenAIEmbeddings:
+     def __init__(self, model_name="text-embedding-3-large"):
+-        # Use AzureApiWrapper for embeddings (is_embedding=True)
+-        self.embedding_model = AzureApiWrapper(model_name, is_embedding=True)
++        local_url = os.environ.get("ACON_LOCAL_EMBEDDING_URL")
++        if local_url:
++            logger.info(
++                "ACON_LOCAL_EMBEDDING_URL set -> using local embeddings at %s (model label %s)",
++                local_url, model_name,
++            )
++            self.embedding_model = _LocalEmbeddingClient(local_url, model_name)
++        else:
++            # Use AzureApiWrapper for embeddings (is_embedding=True)
++            self.embedding_model = AzureApiWrapper(model_name, is_embedding=True)
+         
+ 
+     def embed_documents(self, texts: list[str]) -> list[list[float]]:
