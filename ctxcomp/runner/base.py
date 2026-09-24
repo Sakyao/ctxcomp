@@ -22,10 +22,22 @@ class EngineConfig:
     max_iter: int = 1000
     budget_hist: int = 4096
     budget_obs: int = 1024
+    # Path to the agent prompt JSON ({system_message, main_prompt_template}), as
+    # named by the manifest. Until this existed the engine used a prompt invented
+    # in the runner and never read the manifest's, which is how it came to tell the
+    # agent it would be given API documentation that the harness never sends.
+    prompt_file: str | None = None
     agent_prompt: str | None = None
     experiment_name: str = "ctxcomp"
     temperature: float = 0.8
-    api_docs_mode: str = "full"          # full | instruction-only
+    # "discover": the agent looks API documentation up at runtime through
+    # `apis.api_docs.*`. This is what the reference harness does -- its first user
+    # message is ~7.3k characters and contains no documentation, and its per-request
+    # input is ~3.7k tokens.
+    # "paste-all": the 425 KB per-task documentation is pasted into every prompt.
+    # Measured at 108,721 input tokens per request, ~30x the reference. Kept for the
+    # record, not as a default.
+    api_docs_mode: str = "discover"      # discover | paste-all
     output_dir: str | None = None        # ctxcomp's own artefacts (metrics)
     save_appworld_artifacts: bool = True # dbs/logs/version under the experiment dir
 

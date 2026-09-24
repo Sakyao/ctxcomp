@@ -24,11 +24,12 @@ two rows comparable.
 Fidelity notes, since they are the difference between this loop and the harness the
 baselines were originally measured on:
 
-* `api_docs` is per task and can be very large (425 KB for a sampled task, roughly
-  100k tokens). `api_docs_mode: full` reproduces a harness that pastes it in whole,
-  which is what makes the uncompressed row genuinely expensive;
-  `instruction-only` is the cheap variant. Recorded in results.json because it
-  changes the meaning of Peak and Dep.
+* `api_docs_mode` decides whether the per-task API documentation is pasted into
+  every prompt. It must stay "discover": the reference harness does not paste it,
+  and its first user message is ~7.3k characters containing no documentation at all.
+  Measured both ways on one task -- 3,700 input tokens per request when the agent
+  looks documentation up through `apis.api_docs.*`, versus 108,721 when it is pasted,
+  a factor of 30 that decides whether a 1000-step run is feasible.
 * Compaction triggers on characters, not tokens, to keep the boundary
   dependency-free. The budget is therefore approximate and is recorded per run.
 
@@ -56,20 +57,56 @@ from .base import EngineConfig, TaskOutcome
 
 CODE_BLOCK = re.compile(r"```(?:python)?\s*(.*?)```", re.S)
 
-DEFAULT_AGENT_PROMPT = """You are an autonomous agent solving a task by writing Python code.
+# The agent prompt is not invented here. `prompts/agent/` holds the reference
+# harness's own prompt, copied from
+#   acon/src/productive_agents/agents/appworld/agent.py  (PROMPT_TEMPLATE)
+#   acon/experiments/appworld/prompts/prompt_v1_answerfix.jinja
+# and it matters more than it looks: it teaches the agent that API documentation is
+# retrieved at runtime rather than supplied, naming the three calls to do it
+# (apis.api_docs.show_app_descriptions / show_api_descriptions / show_api_doc).
+#
+# Measured cost of getting this wrong, on one AppWorld task:
+#   with documentation pasted into every prompt   108,721 input tokens per request
+#   with the agent looking it up                     ~3,700 input tokens per request
+# A factor of 30 that decides whether a 1000-step run is feasible.
+AGENT_PROMPT_DIR = Path(__file__).resolve().parent.parent / "prompts" / "agent"
 
-At each step you are given the task instruction, the available API documentation,
-and the history of what you have already done. Reply with a single Python code
-block and nothing else. The code runs in a persistent interpreter, so variables
-you define stay available.
+# Used for steps after the first. The reference harness's first user message is
+# 7,333 characters (the full prompt above, with a worked example) but its later
+# requests average 1,572 -- the preamble is not resent. So later steps carry a
+# compact context plus a reminder of where the documentation lives.
+CONTINUATION_REMINDER = """Reminder: you are not given API documentation. Look it up with
+  apis.api_docs.show_app_descriptions()
+  apis.api_docs.show_api_descriptions(app_name='<app>')
+  apis.api_docs.show_api_doc(app_name='<app>', api_name='<api>')
+Reply with one Python code block."""
 
-Rules:
-- Call the APIs exactly as documented. Parameter names matter.
-- `apis.supervisor.complete_task(...)` ends the task. For tasks that are not
-  questions, call it with no `answer` argument; passing an answer to a
-  non-question task fails the task.
-- Do not re-do work that already succeeded.
-"""
+
+def load_agent_prompt(cfg: "EngineConfig") -> tuple[str, "Template | None"]:
+    """(system_message, first_user_template) from the configured prompt JSON.
+
+    The manifest names a prompt file, and until now the engine never read it: it
+    used a prompt invented here, which told the agent it would be given API
+    documentation. It never was, so the agent guessed signatures and every call
+    failed with "Usage of the following APIs ..." -- visible in the smoke run's
+    trajectory, 6 steps and 6 execution errors.
+    """
+    from jinja2 import Template
+
+    spec_path = Path(cfg.prompt_file) if cfg.prompt_file else None
+    if not spec_path:
+        return "", None
+    if not spec_path.is_absolute():
+        spec_path = AGENT_PROMPT_DIR / spec_path.name
+    if not spec_path.exists():
+        spec_path = AGENT_PROMPT_DIR / "prompts_v1_answerfix.json"
+    spec = json.loads(spec_path.read_text())
+    system = spec.get("system_message", "")
+    tpl_name = Path(str(spec.get("main_prompt_template", ""))).name
+    tpl_path = AGENT_PROMPT_DIR / tpl_name
+    if not tpl_path.exists():
+        tpl_path = AGENT_PROMPT_DIR / "prompt_v1_answerfix.jinja"
+    return system, Template(tpl_path.read_text())
 
 
 def extract_code(text: str) -> str:
@@ -78,8 +115,12 @@ def extract_code(text: str) -> str:
 
 
 def build_context(instruction: str, api_docs: str, history: list[Turn],
-                  summary: str, cfg: EngineConfig) -> str:
-    parts = [f"# Task\n{instruction}"]
+                  summary: str, cfg: EngineConfig,
+                  first_template=None, supervisor=None, is_first: bool = False) -> str:
+    if is_first and first_template is not None:
+        # The reference prompt verbatim, including its worked example.
+        return first_template.render(instruction=instruction, supervisor=supervisor)
+    parts = [f"# Task\n{instruction}", CONTINUATION_REMINDER]
     if api_docs:
         parts.append(f"# API documentation\n{api_docs}")
     if summary:
@@ -131,8 +172,11 @@ class AppWorldEngine:
         task_dir.mkdir(parents=True, exist_ok=True)
 
         instruction = world.task.instruction
-        api_docs = str(world.task.api_docs) if cfg.api_docs_mode == "full" else ""
-        system = cfg.agent_prompt or DEFAULT_AGENT_PROMPT
+        api_docs = str(world.task.api_docs) if cfg.api_docs_mode == "paste-all" else ""
+        system, first_template = load_agent_prompt(cfg)
+        if cfg.agent_prompt:                       # explicit override wins
+            system = cfg.agent_prompt
+        supervisor = world.task.supervisor
         axis = getattr(policy, "axis", None) if policy is not None else None
 
         history: list[Turn] = []          # what the agent currently remembers
@@ -142,7 +186,9 @@ class AppWorldEngine:
         total_in = total_out = 0
         try:
             for step in range(1, cfg.max_iter + 1):
-                ctx = build_context(instruction, api_docs, history, summary, cfg)
+                ctx = build_context(instruction, api_docs, history, summary, cfg,
+                                    first_template=first_template,
+                                    supervisor=supervisor, is_first=(step == 1))
                 reply = self.llm.chat(ctx, system=system, temperature=cfg.temperature)
                 sessions[-1].extend([{"role": "user", "content": ctx},
                                      {"role": "assistant", "content": reply}])

@@ -165,7 +165,9 @@ def main() -> int:
     ap.add_argument("--methods", default=None, help="comma-separated subset, in order")
     ap.add_argument("--repeats", type=int, default=None)
     ap.add_argument("--max-iter", type=int, default=None)
-    ap.add_argument("--api-docs-mode", default="full", choices=["full", "instruction-only"])
+    ap.add_argument("--api-docs-mode", default=None,
+                    choices=["discover", "paste-all"],
+                    help="Default comes from methods.yml (discover).")
     ap.add_argument("--appworld-root", default=os.environ.get("APPWORLD_ROOT"),
                     help="AppWorld home. Needed before appworld is imported: the "
                          "package resolves data/tasks and experiments/outputs "
@@ -199,6 +201,7 @@ def main() -> int:
     reps = args.repeats or man["repeats"]
     max_iter = args.max_iter or man["max_iter"]
     want = set(args.methods.split(",")) if args.methods else None
+    api_docs_mode = args.api_docs_mode or man.get("api_docs_mode", "discover")
     ids = list(load_task_ids(split))
     if args.limit:
         ids = ids[:args.limit]
@@ -286,14 +289,15 @@ def main() -> int:
                 "model": model, "served_model": served,
                 "endpoint_fingerprint": fp, "repeat": k,
                 "max_iter": max_iter, "budget_hist": th_hist, "budget_obs": th_obs,
-                "api_docs_mode": args.api_docs_mode, "split": split,
+                "api_docs_mode": api_docs_mode, "split": split,
                 "verdict": "running",
             }
             (run_dir / "run.inprogress.json").write_text(json.dumps(provisional, indent=2))
 
             cfg_kwargs = {"model": model, "max_iter": max_iter,
                           "budget_hist": th_hist, "budget_obs": th_obs,
-                          "api_docs_mode": args.api_docs_mode,
+                          "api_docs_mode": api_docs_mode,
+                          "prompt_file": man.get("prompt_file"),
                           "experiment_name": experiment_name}
             t0 = time.time()
             print(f"[{real_now()}] start {run_name}", flush=True)
@@ -369,7 +373,7 @@ def main() -> int:
                 "max_iter": max_iter,
                 "budget_hist": man["thresholds"]["history"],
                 "budget_obs": man["thresholds"]["observation"],
-                "api_docs_mode": args.api_docs_mode, "split": split,
+                "api_docs_mode": api_docs_mode, "split": split,
                 "seconds": round(elapsed, 1), "verdict": verdict, "acc": acc,
                 "finished_at": real_now(),
             }, indent=2))

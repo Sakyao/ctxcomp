@@ -64,6 +64,16 @@ split: test_normal
 # this name, and the two disagreeing is the signal that a row is unattributable.
 model: deepseek-v4-flash
 
+# Whether the per-task API documentation is pasted into every prompt.
+#
+#   discover   the agent looks documentation up at runtime via apis.api_docs.*
+#   paste-all  425 KB of documentation in every prompt
+#
+# Measured on one AppWorld task: 3,700 input tokens per request under `discover`,
+# 108,721 under `paste-all` -- a factor of 30, which decides whether a 1000-step run
+# is feasible at all. The reference harness uses `discover`; its first user message
+# is ~7.3k characters and contains no documentation.
+
 # Agent system prompt. Must be the answer-fixed variant: with the stock prompt the
 # agent answers non-questions ("Done.") and fails AppWorld's answer assertion,
 # which depresses every method equally and compresses the differences we are
@@ -80,6 +90,8 @@ max_iter: 1000
 # Independent runs per task. 1 gives Acc/Easy/Medium/Hard/Steps/Peak/Dep.
 # 2 additionally gives Pass^2/Pass@2, at double the cost.
 repeats: 1
+
+api_docs_mode: discover
 
 thresholds:
   history: 4096
