@@ -21,22 +21,37 @@ from pathlib import Path
 from .difficulty import LEVELS, difficulty
 from .tokens import run_token_stats
 
-METHOD_RE = re.compile(r"^(?P<method>[a-z_]+?)(?:__r(?P<rep>\d+))?$")
+REPEAT_RE = re.compile(r"^r(\d+)$")
+
+
+def parse_run_name(name: str) -> tuple[str, str | None, int]:
+    """(method, served_model, repeat) from "<method>__<model>[__r<k>]".
+
+    Split on the double underscore rather than matched with a pattern: model ids
+    contain hyphens and dots, and a method name is a prefix of no other field, so a
+    regexp would be a worse description of the format than a split.
+    """
+    parts = name.split("__")
+    if len(parts) == 1:
+        return parts[0], None, 1
+    rep = 1
+    if REPEAT_RE.match(parts[-1]):
+        rep = int(parts[-1][1:])
+        parts = parts[:-1]
+    return parts[0], "__".join(parts[1:]) or None, rep
 
 
 def load_runs(runs_root: Path, stamp: str) -> dict[str, list[Path]]:
-    """method -> [run dirs], sorted by repeat index."""
+    """method -> [run dirs], ordered by repeat index."""
     out: dict[str, list[Path]] = {}
     base = runs_root / stamp
     if not base.is_dir():
         return out
-    for d in sorted(base.iterdir()):
+    for d in sorted(base.iterdir(), key=lambda p: parse_run_name(p.name)[2]):
         if not d.is_dir():
             continue
-        m = METHOD_RE.match(d.name)
-        if not m:
-            continue
-        out.setdefault(m.group("method"), []).append(d)
+        method, _, _ = parse_run_name(d.name)
+        out.setdefault(method, []).append(d)
     return out
 
 
@@ -128,8 +143,18 @@ def render(rows: list[tuple[str, dict]], stamp: str, split: str) -> str:
         ] + [s["levels"][k][0] for k in ("1", "2", "3")]
         mark = " ⚠️" if s.get("contaminated") else ""
         lines.append("| " + " | ".join(cells) + mark + " |")
-    lines += ["", "_Peak in 10^3, Dep. in 10^6. Steps = environment interactions. "
-                  "Pass^2 / Pass@2 require repeats >= 2._", "", "## backbone and provenance", ""]
+    lines += ["", "```",
+              "Pass^2 (P^k, k=2)  fraction solved in ALL runs      -> reliability",
+              "Avg Acc            mean single-run success rate   (already an average over runs)",
+              "Pass@2  (P@k, k=2) fraction solved in AT LEAST ONE -> capability",
+              "invariant:  Pass^2 <= Avg Acc <= Pass@2",
+              "```",
+              "",
+              "_Peak in 10^3, Dep. in 10^6. Steps = environment interactions. "
+              "Pass^2 / Pass@2 both read the same repeats, so one doubling of cost "
+              "fills both; with repeats = 1 they collapse onto Acc and are shown as -._",
+              "",
+              "## backbone and provenance", ""]
     for label, s in rows:
         if s.get("ok"):
             lines.append(f"- {label}: {', '.join(s['backbones']) or 'unknown'} "

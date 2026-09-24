@@ -119,12 +119,24 @@ would be unusable.
 | metric | definition |
 |---|---|
 | **Avg Acc** | mean task success over `repeats` independent runs |
-| **Pass^2** | fraction solved in **all** runs — multi-run reliability |
-| **Pass@2** | fraction solved in **at least one** run — task coverage |
+| **Pass^2** | `P^k` with k=2 — fraction solved in **all** runs: reliability |
+| **Pass@2** | `P@k` with k=2 — fraction solved in **at least one** run: capability |
 | **Easy / Medium / Hard** | per-difficulty success (57 / 48 / 63 tasks) |
 | **Steps** | mean environment interactions per task |
 | **Peak** | max input context length over all steps, **including** the system prompt, in 10³ tokens |
 | **Dep.** | `Σ_t ((n_i + 2·n_o)·n_o)/2` with `n_i` **excluding** the system prompt, in 10⁶ |
+
+Pass^2 and Pass@2 are the pair of multi-run readings used by TRACE (its equation 9
+and section 3.1, following tau-bench). They are not alternatives: Pass@2 says
+whether a task is still *within* the method's reach, Pass^2 says whether the method
+hits it *reliably*. The gap `Pass@2 - Pass^2` is the intermittency — two methods with
+the same Avg Acc but different gaps have different failure modes, which is the
+distinction a single accuracy number hides. The invariant `Pass^2 <= Avg Acc <=
+Pass@2` holds by construction and is a useful check on a table.
+
+Both read the **same** repeats, so one doubling of cost fills both. At
+`repeats: 1` they collapse onto Avg Acc and are printed as `-`, rather than
+reporting a number that carries no extra information.
 
 Acc, difficulty and the evaluator's verdict come from AppWorld's scorer, which
 replays the final database state against ground truth. Steps, Peak and Dep are
