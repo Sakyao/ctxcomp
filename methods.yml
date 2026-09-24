@@ -1,11 +1,27 @@
-# One entry per method. Single source of truth: run_suite.py, compute_table.py and
-# check_methods.py all read this file.
+# Experiment suite -- one row per method, per compression axis.
+# Single source of truth: make_configs.py, run_suite.sh and compute_table.py read it.
 #
-# Adding a method = add entries here + drop its prompt files under
-# ctxcomp/prompts/. A missing prompt is a hard error: it does not raise anywhere
-# in the execution path -- the compressor would fall back to a default, the row
-# would still produce numbers, and the table would look fine while the row means
-# nothing.
+# ---------------------------------------------------------------------------
+# Where the baselines actually run
+# ---------------------------------------------------------------------------
+# The harness is NOT in this repository. Every row is executed, unchanged, by the
+# code in the ACON checkout named by ACON_ROOT:
+#
+#   compressor    src/productive_agents/ctxopt/{history,obs}_optimizer.py
+#   trigger       src/productive_agents/agents/memory.py
+#   agent loop    src/productive_agents/agents/unified_agent.py
+#   entry point   experiments/appworld/run_all.py
+#
+# This repository owns the manifest, the prompt assets, the driver and the table.
+# The one file that adapts anything is make_configs.py, and only where upstream's
+# own config generator cannot express an observation row at all -- see its
+# docstring. A baseline that were re-implemented here could differ from itself
+# between runs, which is exactly what a comparison table must not contain.
+#
+# Local edits inside ACON are not invisible: they are patches/, with reasons and
+# the command to revert. None of them touch a compression method, the agent, the
+# budget or the metric; they make the harness executable against a self-hosted
+# model instead of Azure.
 #
 # ---------------------------------------------------------------------------
 # Two compression axes, not one
@@ -16,257 +32,261 @@
 #   history      h'_t = f(h_t; phi, P_hist)          if |h_t| > T_hist
 #   observation  o'_t = f(o_t, h_{t-1}; phi, P_obs)  if |o_t| > T_obs
 #
-# They differ in input, in output format, in threshold, and in the prompt being
-# optimised: P_hist and P_obs are separately learned. A compression method
-# therefore has two rows, and comparing a history row against an observation row
-# is a category error.
+# They differ in input, in output shape, in threshold, and in the prompt being
+# optimised: P_hist and P_obs are separately learned. The axis is therefore a
+# property of the ROW (`kind:`), not a suffix on a method's name, and comparing a
+# history row against an observation row is a category error.
 #
-# Every method except no_compression is split into a hist_* and an obs_* row. The
-# observation axis is not "drop old observations": by equation (4) it applies to
-# the CURRENT observation when that observation alone is too long.
+# Not every method has both axes, and that is a fact about the method, not a gap to
+# paper over. Discarding old turns (fifo) is a history mechanism; ACON's observation
+# axis is defined on the CURRENT observation exceeding T_obs, so a recency window
+# over observations is a different method and is listed under "not run" below.
 #
 # ---------------------------------------------------------------------------
 # Thresholds
 # ---------------------------------------------------------------------------
-# T_hist = 4096, T_obs = 1024, from the paper's analysis section, which states
-# that medium values are best and names these two.
+# T_hist = 4096 and T_obs = 256, both hard-coded in make_configs.py exactly as
+# upstream has them.
 #
-# Deviation to be aware of: our earlier ACON-harness suite used T_obs = 256, four
-# times more aggressive than the paper. Those obs runs never completed, so no
-# result rests on 256; it is recorded here because any obs_* number from that
-# harness is not comparable with a paper number without noting the difference.
+# T_obs is 256 -- NOT the 1024 an earlier draft of this repository used. The paper's
+# analysis section discusses medium thresholds and names 4096, but the code this
+# suite drives clamps observations at 256, and a row has to be measured at the
+# setting it will be compared under.
 #
 # ---------------------------------------------------------------------------
-# What each row needs
+# Metric definitions (ACON paper Table 1)
 # ---------------------------------------------------------------------------
-#   policy: builtin   a mechanism, no prompt (fifo, llmlingua)
-#   policy: prompt    a prompt directory; one code path for all of them
+#   Acc      mean success over `repeats` runs, from AppWorld's own evaluator
+#   Pass^2   solved in ALL runs          } require repeats >= 2,
+#   Pass@2   solved in AT LEAST ONE run  } print "-" when repeats == 1
+#   Steps    mean environment interactions per task
+#   Peak     max input context length over all steps, INCLUDING system prompt
+#   Dep.     sum_t ((n_i + 2*n_o) * n_o) / 2, n_i EXCLUDES system prompt
+#            (paper prints Peak in 10^3, Dep. in 10^6)
+# Steps / Peak / Dep are read from analysis_tools.analyze_experiment_tokens_v2 --
+# the implementation they were measured with -- and are not recomputed here.
 #
-# For prompt-driven methods the observation template must exist as
-# <prompts.dir>/obs.jinja. Where the upstream project ships no observation prompt,
-# the template is derived from that project's own history prompt so the
-# preservation criteria stay the same, and the row says so in `source`. The
-# alternative -- reusing one generic observation prompt across several methods --
-# would make those rows identical to each other while appearing to be different
-# methods.
+# ---------------------------------------------------------------------------
+# Prompt provenance
+# ---------------------------------------------------------------------------
+# prompts/ mirrors each upstream project. A file that is byte-identical to its
+# source is `ported`. A template this repository authored -- because the upstream
+# project ships no observation-level prompt -- is `derived`, and its row says so:
+# a derived template is a different object of study from the published method it is
+# attached to, and a reader has to be able to tell them apart.
 
 benchmark: appworld
 split: test_normal
 
-# The model name sent in the request. It must be an id the endpoint actually
-# serves, or every call fails -- the server does not accept aliases for a model it
-# has not loaded. Check with:
-#     curl -s $BASE/v1/models -H "Authorization: Bearer $KEY" | python -m json.tool
-#
-# This is a LABEL, not an identity. The endpoint here has been redeployed four
-# times in a day under three different names while the weights changed underneath,
-# so a run directory records a behavioural fingerprint of the backbone alongside
-# this name, and the two disagreeing is the signal that a row is unattributable.
+# The model id the endpoint ACTUALLY serves, not the name of the weights behind it.
+# This one is a LABEL the server validates: an id it has not loaded is rejected, and
+# nothing in the request reveals which weights answered. Check before every round --
+#     curl -s $ACON_VLLM_BASE_URL/models -H "Authorization: Bearer $ACON_VLLM_API_KEY"
+# -- because this endpoint has been redeployed mid-experiment before, under a
+# different name and with different weights, which is why run_suite.sh fingerprints
+# it before and after each row. On 2026-09-25 it served `deepseek-v4-flash`.
 model: deepseek-v4-flash
 
-# Whether the per-task API documentation is pasted into every prompt.
+# Agent prompt. MUST stay the answer-fixed variant: with the stock prompt the agent
+# answers non-questions ("Done.") and fails AppWorld's answer assertion, which
+# depresses every row equally and compresses the differences under study.
 #
-#   discover   the agent looks documentation up at runtime via apis.api_docs.*
-#   paste-all  425 KB of documentation in every prompt
-#
-# Measured on one AppWorld task: 3,700 input tokens per request under `discover`,
-# 108,721 under `paste-all` -- a factor of 30, which decides whether a 1000-step run
-# is feasible at all. The reference harness uses `discover`; its first user message
-# is ~7.3k characters and contains no documentation.
+# NOTE: upstream's own manifest names `./prompts/prompts_v1_answerfix.jinja`. That
+# file does not exist -- what exists is the JSON, whose `main_prompt_template` field
+# points at the .jinja. A run in that checkout records
+# `./prompts/prompts_v1_answerfix.json`, which is what is used here.
+prompt_file: ./prompts/prompts_v1_answerfix.json
 
-# Agent system prompt. Must be the answer-fixed variant: with the stock prompt the
-# agent answers non-questions ("Done.") and fails AppWorld's answer assertion,
-# which depresses every method equally and compresses the differences we are
-# trying to measure.
-prompt_file: prompts/prompts_v1_answerfix.jinja
-
-# Interaction budget per task. AppWorld's own default is 1000; the upstream ACON
-# code hard-codes 50 in four places, which is 1/20 of the environment's own
-# default. Under a 50 budget a task that hits the cap always fails, so the row
-# score collapses to ~1 - (cap-hit rate) and the ranking measures step efficiency
-# rather than context fidelity. Rows are only comparable at equal max_iter.
+# Interaction budget per task. AppWorld's own default is 1000; upstream ACON
+# hard-codes 50 in four places, which is 1/20 of the environment's own default.
+# Under a 50 budget a task that hits the cap always fails, so the row score
+# collapses to ~1 - (cap-hit rate) and the ranking measures step efficiency rather
+# than context fidelity. Rows are only comparable at equal max_iter.
 max_iter: 1000
 
 # Independent runs per task. 1 gives Acc/Easy/Medium/Hard/Steps/Peak/Dep.
 # 2 additionally gives Pass^2/Pass@2, at double the cost.
 repeats: 1
 
-api_docs_mode: discover
-
-thresholds:
-  history: 4096
-  observation: 1024
-
 rows:
   # ---------------------------------------------------------------- reference
   - name: no_compression
     label: No compression
-    axis: none
-    policy: builtin
+    kind: none
     source: >
-      Full uncompressed history. Reference for behaviour preservation and for the
-      Peak/Dep units. Not split into hist_/obs_: it compresses nothing, so the
-      axis does not apply, and both axes are compared against this one row.
+      Full uncompressed history, executed with no co_config at all. Reference for
+      behaviour preservation and for the Peak/Dep units. It has no axis: it
+      compresses nothing, so both axes are compared against this one row.
 
-  # ---------------------------------------------------------------------- fifo
+  # ------------------------------------------------------------ history axis
   - name: hist_fifo
-    label: FIFO (history)
-    axis: history
-    policy: builtin
-    keep_last: 5
+    label: FIFO
+    kind: history
+    ctxopt: {prompt_dir: prompts/context_opt, system: system_prompt, history: prompt_history_v2}
+    baseline: discard
+    preserve_last_k_turns: 5
     source: >
-      Recency-only sliding window. Discards whole turns oldest-first: the
-      difference between "drop the turn" and "keep the action, drop the
-      observation" is the difference between this and observation masking, and
-      conflating them would make both rows uninterpretable.
+      ACON recency baseline, memory.py::optimize_history with
+      baseline_strategy=discard: once more than preserve_last_k_turns turns
+      accumulate it drops whole turns oldest-first, keeping the first task
+      instruction plus the last 5 turns. Discards the turn, not the observation --
+      conflating the two would make this row and observation masking
+      uninterpretable. The ctxopt prompt files are never read on this path; they
+      exist because the config generator requires a resolvable pair.
 
-  - name: obs_fifo
-    label: FIFO (observation)
-    axis: observation
-    policy: builtin
-    keep_last: 5
-    source: >
-      Non-LLM observation truncation: when the current observation alone exceeds
-      T_obs, keep its head and tail up to the budget. Chosen over "drop old
-      observations" because equation (4) compresses the CURRENT observation, and a
-      recency window over observations would be a different method.
-
-  # ----------------------------------------------------------------- llmlingua
   - name: hist_llmlingua
-    label: LLMLingua (history)
-    axis: history
-    policy: builtin
+    label: LLMLingua
+    kind: history
+    ctxopt: {prompt_dir: prompts/context_opt, system: system_prompt, history: prompt_history_v2}
+    llmlingua: true
     keep_rate: 0.30
     source: >
-      Token-level extractive pruning with LLMLingua-2
-      (microsoft/llmlingua-2-xlm-roberta-large-meetingbank) applied to the
-      compressible history. Keep rate 30%, as in the ACON paper.
+      LLMLingua-2 (microsoft/llmlingua-2-xlm-roberta-large-meetingbank) as ACON
+      calls it: an out-of-repo HTTP service at localhost:9999 (base.py:213). NOTE:
+      `keep_rate` in this manifest is copied from upstream's manifest but is NOT
+      read by the code -- history_optimizer.py:117 hard-codes ratio=0.2, while the
+      observation path hard-codes 0.3 (obs_optimizer.py:99). The row is therefore a
+      20% keep rate, and the manifest says 0.30 only because upstream's does.
 
-  - name: obs_llmlingua
-    label: LLMLingua (observation)
-    axis: observation
-    policy: builtin
-    keep_rate: 0.30
-    source: >
-      Same pruner applied to the current observation when it exceeds T_obs. This
-      is the row ACON calls observation compression with LLMLingua.
-
-  # --------------------------------------------------------------- prompt-O
   - name: hist_prompting_o
-    label: Prompting-O (history)
-    axis: history
-    policy: prompt
-    prompts: {dir: openclaw, system: system, first: first, update: update}
+    label: Prompting-O
+    kind: history
+    ctxopt: {prompt_dir: prompts/openclaw, system: system, history: update, first: first}
     source: >
-      OpenClaw agent-core compaction, commit 0e7b5c3. Two-stage: a `first`
-      checkpoint prompt, then an `update` prompt that folds new turns into the
-      previous checkpoint. Named Prompting-O in TRACE, where it is the strongest
-      existing compressed baseline (Acc 71.4, vs ACON-UT 62.5).
+      OpenClaw agent-core compaction (TRACE's Prompting-O), commit 0e7b5c3:
+      `first` checkpoint prompt, then `update` folds new turns into the previous
+      checkpoint. Strongest existing compressed baseline in TRACE (Acc 71.4 vs
+      ACON-UT 62.5). Prompts: ported. Upstream's two prompts are composed into one
+      template branching on `prev_summary` (make_configs.py::compose_two_stage),
+      which is upstream's own adaptation, not a local one.
 
-  - name: obs_prompting_o
-    label: Prompting-O (observation)
-    axis: observation
-    policy: prompt
-    prompts: {dir: openclaw, system: system, obs: obs}
-    source: >
-      DERIVED, not from upstream: OpenClaw ships no observation-level prompt. The
-      template keeps OpenClaw's own preservation criteria and moves them onto the
-      single-observation task, so the row differs from Prompt-O only in what is
-      being compressed.
-
-  # --------------------------------------------------------------- prompt-H
   - name: hist_prompting_h
-    label: Prompting-H (history)
-    axis: history
-    policy: prompt
-    prompts: {dir: hermes, system: system, first: first, update: update, prefix: prefix}
+    label: Prompting-H
+    kind: history
+    ctxopt: {prompt_dir: prompts/hermes, system: system, history: update, first: first}
     source: >
-      NousResearch/hermes-agent, commit cca3b77. Head (system + first exchange) and
-      tail protected by a token budget, middle summarised. Every checkpoint is
-      prefixed with a REFERENCE ONLY note telling the agent not to re-answer
-      resolved questions and to let the latest user message win on conflict.
+      NousResearch/hermes-agent, commit cca3b77: head and tail protected by a token
+      budget, middle summarised, every checkpoint carrying a REFERENCE ONLY note.
+      Prompts: ported (prefix.jinja included; upstream's make_configs copies it
+      alongside the composed template).
 
-  - name: obs_prompting_h
-    label: Prompting-H (observation)
-    axis: observation
-    policy: prompt
-    prompts: {dir: hermes, system: system, obs: obs, prefix: prefix}
-    source: >
-      DERIVED, not from upstream: Hermes ships no observation-level prompt. Keeps
-      Hermes's structured checkpoint shape and its REFERENCE ONLY prefix, applied
-      to one observation instead of the conversation.
-
-  # ------------------------------------------------------------------- trace
   - name: hist_trace
-    label: TRACE (history)
-    axis: history
-    policy: prompt
-    prompts: {dir: trace, system: system_prompt, first: first, update: update}
+    label: TRACE
+    kind: history
+    ctxopt: {prompt_dir: prompts/trace, system: system_prompt, history: update, first: first}
     source: >
-      TRACE (Min et al., arXiv 2608.06503). Same benchmark and setting as here:
-      AppWorld test-normal 168 (57/48/63), 4096-token window, frozen backbone.
-      Template is the selected candidate_1 (policy_sha256 94d193fc...), rebuilt
-      with the authors' own renderer. candidate_1 is the iterative-update prompt;
-      upstream pairs it with the base first-compaction prompt.
+      TRACE (Min et al., arXiv 2608.06503). Same benchmark and setting as this
+      suite: AppWorld test-normal 168 (57/48/63), 4096-token window, frozen
+      backbone. Template is the selected candidate_1 (policy_sha256 94d193fc...),
+      rebuilt with the authors' own renderer; upstream pairs it with the base
+      first-compaction prompt. Prompts: ported.
 
-  - name: obs_trace
-    label: TRACE (observation)
-    axis: observation
-    policy: prompt
-    prompts: {dir: trace, system: system_prompt, first: first, obs: obs}
-    source: >
-      DERIVED, not from upstream: TRACE addresses history compression only and
-      publishes no observation prompt. Keeps TRACE's own criteria for what must
-      survive compression, applied to the current observation.
-
-  # -------------------------------------------------------------------- acon
   - name: hist_acon_ut
-    label: ACON-UT (history)
-    axis: history
-    policy: prompt
-    prompts: {dir: acon_ut, system: system, update: history}
+    label: ACON-UT
+    kind: history
+    ctxopt: {prompt_dir: prompts/acon_ut, system: system, history: history}
     source: >
-      ACON utility-optimised history guideline. NOTE: this is our own ut1 optimiser
-      run on the AppWorld train split, not the guideline the ACON authors shipped
-      -- UT/CO output depends on the trajectories and the agent prompt it was
-      optimised against, so two faithful reproductions of the method produce two
-      different texts. Record the guideline sha256 with any result.
-
-  - name: obs_acon_ut
-    label: ACON-UT (observation)
-    axis: observation
-    policy: prompt
-    prompts: {dir: acon_ut, system: system, obs: obs}
-    source: >
-      Authentic observation prompt: ACON's own P_obs template, whose input is
-      (task, prior history, current observation) and whose output is a "Refined
-      Observation". Distinguishable from P_hist, which takes (task, previous
-      summary, history) and emits a structured checkpoint.
-      Caveat, stronger than for hist_acon_ut: P_obs is optimised for its own
-      objective, and our local optimiser run only ever produced a history
-      guideline, so this row uses the shipped template rather than an optimised
-      observation guideline.
+      ACON utility-optimised history guideline. Prompts: ported from this machine's
+      `prompt_optimizer/outputs/ut1/improved_history_prompt_samples_*`. NOTE: this is
+      a local UT optimiser run on the AppWorld train split, not the guideline the
+      ACON authors shipped -- UT/CO output depends on the trajectories and on the
+      agent prompt it was optimised against, so two faithful reproductions of the
+      method produce two different texts. Record the guideline sha256 with any
+      result.
 
   - name: hist_acon_utco
-    label: ACON-UT+CO (history)
-    axis: history
-    policy: prompt
-    prompts: {dir: acon_utco, system: system, update: history}
+    label: ACON-UT+CO
+    kind: history
+    ctxopt: {prompt_dir: prompts/acon_utco, system: system, history: history}
     source: >
-      ACON utility+compression-optimised history guideline, i.e. the second
-      optimiser stage on top of UT. Stage 1 (utility) maximises success rate; stage
-      2 (compression) optimises length on the tasks that already succeed, writing
-      files prefixed `length_optimized_history_prompt_`. NOT PRESENT: only the ut1
-      stage has been run locally, so the directory is empty and check_methods.py /
-      run_suite.py refuse the row rather than quietly substituting a default.
+      ACON utility+compression-optimised history guideline: stage 1 (utility)
+      maximises success rate, stage 2 (compression) shortens the guideline on the
+      tasks that already succeed, writing `length_optimized_history_prompt_*`.
+      Prompts: ported, byte-identical to
+      `prompt_optimizer/outputs/co1/optimized_prompts/length_optimized_history_prompt_0.jinja`.
+      Upstream's manifest says this row is absent; it became available once the co1
+      stage was run here.
+
+  # -------------------------------------------------------- observation axis
+  - name: obs_llmlingua
+    label: LLMLingua (obs)
+    kind: obs
+    ctxopt: {prompt_dir: prompts/context_opt, system: system_prompt, obs: prompt_user}
+    llmlingua: true
+    keep_rate: 0.30
+    source: >
+      ACON's observation-compression setting for LLMLingua: obs_optimizer.py:99
+      prunes the current observation at ratio 0.3, which is the ratio the code
+      hard-codes for this axis (the manifest's keep_rate is again not read).
+
+  - name: obs_prompting_o
+    label: Prompting-O (obs)
+    kind: obs
+    ctxopt: {prompt_dir: prompts/openclaw, system: system, obs: obs}
+    source: >
+      Observation axis with OpenClaw's compaction criteria. Prompts: DERIVED, not
+      upstream -- OpenClaw ships no observation-level prompt. The template keeps
+      OpenClaw's own preservation criteria and moves them onto the single
+      observation task, so the row differs from its history counterpart only in what
+      is being compressed. Read it as "Prompting-O adapted to the observation axis",
+      never as the published Prompting-O.
+
+  - name: obs_prompting_h
+    label: Prompting-H (obs)
+    kind: obs
+    ctxopt: {prompt_dir: prompts/hermes, system: system, obs: obs}
+    source: >
+      Observation axis with Hermes's checkpoint criteria. Prompts: DERIVED, not
+      upstream -- Hermes ships no observation-level prompt. Keeps Hermes's structured
+      checkpoint shape and its REFERENCE ONLY prefix, applied to one observation
+      instead of a conversation.
+
+  - name: obs_trace
+    label: TRACE (obs)
+    kind: obs
+    ctxopt: {prompt_dir: prompts/trace, system: system_prompt, obs: obs}
+    source: >
+      Observation axis with TRACE's criteria. Prompts: DERIVED, not upstream --
+      TRACE addresses history compression only and publishes no observation prompt.
+      Keeps TRACE's own criteria for what must survive compression, applied to the
+      current observation.
+
+  - name: obs_acon_ut
+    label: ACON-UT (obs)
+    kind: obs
+    ctxopt: {prompt_dir: prompts/acon_ut, system: system, obs: obs}
+    source: >
+      ACON's own P_obs template, whose input is (task, prior history, current
+      observation) and whose output is a "Refined Observation" -- distinguishable
+      from P_hist, which takes (task, previous summary, history) and emits a
+      structured checkpoint. Prompts: ported, byte-identical in body to
+      `experiments/appworld/prompts/context_opt/prompt_user.jinja`. Caveat: our
+      local optimiser only ever produced a history guideline, so this row uses the
+      shipped P_obs rather than an optimised observation guideline.
 
   - name: obs_acon_utco
-    label: ACON-UT+CO (observation)
-    axis: observation
-    policy: prompt
-    prompts: {dir: acon_utco, system: system, obs: obs}
+    label: ACON-UT+CO (obs)
+    kind: obs
+    ctxopt: {prompt_dir: prompts/acon_utco, system: system, obs: obs}
     source: >
-      Requires the joint UT+CO optimiser run on the observation objective
+      Would need the joint UT+CO optimiser run on the observation objective
       (upstream: experiments/prompt_optimizer/
-      unified_compress_update_observation_prompt.py). Never run. NOT PRESENT for
-      the same reason as hist_acon_utco.
+      unified_compress_update_observation_prompt.py). Never run, and
+      prompts/acon_utco/ ships no observation template, so make_configs.py refuses
+      the row instead of quietly substituting a default.
+
+# Rows deliberately NOT run, and why:
+#
+#   obs_fifo        ACON's observation axis compresses the CURRENT observation when
+#                   it alone exceeds T_obs. Upstream implements no non-LLM
+#                   observation truncation, so this row could only exist by
+#                   implementing a method in this repository -- which is what the
+#                   suite must not do. History-axis fifo covers the recency
+#                   baseline.
+#   retrieval       A-MEM-style k-turn selection is memory selection, not long-
+#                   horizon compression. TRACE omits it as a baseline too.
+#   observation_masking
+#                   "The Complexity Trap" (arXiv 2508.21433) matches summarisation on
+#                   SWE-bench Verified, but its authors restrict it to verbose tool
+#                   output in software engineering, and its baselines/cost metrics
+#                   do not align with this table. A positioning caveat, not a row.

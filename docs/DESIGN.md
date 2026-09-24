@@ -1,53 +1,71 @@
-# Where this project's own method goes
+# Design: why this repository is a suite, not a harness
 
-This repository is the baseline harness. The project's own contribution is
-**not implemented here yet**; its design lives in the project documents outside
-this repo. This file only records the interface it has to satisfy, so that the
-harness and the method can be developed without either assuming the other's
-internals.
+## The split
 
-## The slot
-
-`ctxcomp/methods/` holds one class per policy. The baselines are:
-
-- `builtin.py` — no LLM: full history, recency truncation, token pruning.
-- `prompted.py` — one code path for every prompt-driven method, because they
-  differ only in prompt text; five prompt directories, one implementation.
-
-A new method is a new class satisfying `CompressionPolicy`:
-
-```python
-def compress(self, req: CompressionRequest) -> CompressionResult: ...
+```
+ctxcomp (this repository)                 ACON checkout (ACON_ROOT)
+  methods.yml      the manifest             src/productive_agents/ctxopt/   compressors
+  make_configs.py  manifest -> co_config    src/productive_agents/agents/memory.py    trigger
+  run_suite.sh     shards, fingerprint,     src/productive_agents/agents/unified_agent.py  loop
+                   run, evaluate            experiments/appworld/run_all.py entry point
+  compute_table.py the table                experiments/analysis_tools/    metric definitions
+  prompts/         prompt assets
 ```
 
-`CompressionRequest` carries the task instruction, the compressible history, the
-previous summary, the budget and `is_first`. That is the whole world the policy
-sees: no environment, no tools, no evaluator, no agent transcript. Two rows are
-comparable exactly to the extent that this stays true, so a method that wants to
-observe more than this is a different experiment.
+The suite knows what to compare and how to read the result; the harness knows how to
+run a policy. Every row is executed by the baseline's own code, so a baseline cannot
+drift from its published implementation by being re-expressed here.
 
-## What the baselines cannot express
+This was not the first shape of the repository. An earlier draft re-implemented the
+agent loop, the compressor dispatch, the metric reducer and the LLMLingua client,
+on the reasoning that a single uniform engine makes the rows comparable. It does the
+opposite: it makes every row a measurement of the re-implementation, and the places
+where the copy and the original disagree — the observation budget, the client
+protocol, whether the system prompt counts toward Peak — are invisible in the
+output. The rule this repository now follows is that a difference between two rows
+may come from the method or from the prompt, and from nothing else.
 
-`CompressionResult` currently returns text. Every baseline produces its
-replacement by generating or discarding text. A method whose compressor is
-optimised against a differentiable objective returns the same text through the
-same interface; what differs is how it was produced, and that lives outside the
-policy — in training, not in the harness.
+## What the suite still owns, and why that is not a re-implementation
 
-That separation is the reason this repo exists independently of the training
-code:
-
-- the harness fixes the agent, the tools, the budget and the metrics, so a
-  training-side change cannot move the measurements;
-- the metrics are recomputed from stored trajectories, so a policy can be
-  re-scored after the fact without re-running the agent.
+- **The manifest.** Which rows exist, on which axis, with which prompt, and where
+  each prompt came from. No harness can answer that; it is the experiment's design.
+- **Config generation.** One YAML per row, with the prompt directory copied beside
+  it so a config is self-contained and diffable. The only adaptation here is that
+  the observation axis needs the `prompt_user` key while upstream's generator emits
+  `prompt_history_user`, which makes its own `kind: obs` path non-functional.
+- **The driver.** Sharding, the endpoint fingerprint taken before and after each row,
+  run naming, and invoking AppWorld's evaluator. A row whose fingerprint moved is
+  stamped `CONTAMINATED` rather than silently averaged in.
+- **The table.** Reads Acc from AppWorld's evaluator output and Steps/Peak/Dep from
+  `analysis_tools.analyze_experiment_tokens_v2`, the implementation they were
+  measured with. It computes the pass^k aggregates and the difficulty split, and
+  prints `-` where a number does not exist.
 
 ## What is deliberately missing
 
-- No prompt optimiser. UT/CO are inputs to this repo (`prompts/acon_ut/`), not
-  part of it; running them is a separate, longer experiment and belongs with the
-  training code.
-- No training loop, no gradients, no model checkpointing.
-- No benchmark expansion beyond AppWorld. `docs/METHODS.md` records what would
-  have to change to add one, and the answer is mostly "the engine", because every
-  metric here is defined on AppWorld's artefacts.
+- **No prompt optimiser.** UT/CO are inputs (`prompts/acon_ut/`,
+  `prompts/acon_utco/`), not part of the suite; running them is a separate, longer
+  experiment.
+- **No training loop,** no gradients, no checkpointing.
+- **No engine of our own.** If a baseline cannot be run by the ACON harness, the row
+  is not run and `methods.yml` says why. `obs_fifo` is the worked example: ACON has
+  no non-LLM observation truncation, so implementing one here would produce a row
+  labelled like a baseline and measured like an invention.
+
+## Metrics, and where they come from
+
+| column | source |
+|---|---|
+| Acc, Pass^2, Pass@2, Easy/Medium/Hard | AppWorld evaluator, `evaluations/<split>.json` |
+| Steps, Peak, Dep. | `analysis_tools.analyze_experiment_tokens_v2` |
+
+Peak includes the system prompt; Dep. excludes it. Both are read from the stored
+trajectory rather than from a counter written during the run, so a row can be
+re-scored after the fact and the definition is auditable in one place.
+
+## Adding a benchmark
+
+Every metric here is defined on AppWorld's artefacts — its evaluator, its difficulty
+labels, its interaction count. A second benchmark is not a flag; it is a second
+`ACON_ROOT`-side entry point plus a metric reader, and the honest version of that
+work starts by finding out whether the harness already exposes those three things.

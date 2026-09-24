@@ -4,13 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ctxcomp"
-version = "0.1.0"
-description = "Context compression for long-horizon LLM agents — baseline harness and metrics"
+version = "0.2.0"
+description = "Comparison suite for context-compression baselines on AppWorld; drives the ACON harness rather than re-implementing it"
 requires-python = ">=3.10"
-dependencies = ["jinja2>=3.1", "tiktoken>=0.7", "pyyaml>=6", "appworld==0.1.3.post1"]
 
-[project.scripts]
-ctxcomp-check = "scripts.check_methods:main"
+# The suite itself needs only a YAML reader to generate configs and one to read the
+# manifest. Everything the baselines need at run time -- torch/llmlingua for the
+# LLMLingua rows, appworld for the environment and its evaluator, tiktoken for the
+# token metrics -- is a dependency of the ACON checkout it drives, not of this
+# repository. See requirements.txt.
+dependencies = ["pyyaml>=6"]
 
 [tool.setuptools]
-packages = ["ctxcomp", "ctxcomp.methods", "ctxcomp.metrics", "ctxcomp.runner"]
+py-modules = ["make_configs", "compute_table"]
