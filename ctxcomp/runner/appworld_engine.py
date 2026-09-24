@@ -135,7 +135,8 @@ class AppWorldEngine:
         system = cfg.agent_prompt or DEFAULT_AGENT_PROMPT
         axis = getattr(policy, "axis", None) if policy is not None else None
 
-        history: list[Turn] = []
+        history: list[Turn] = []          # what the agent currently remembers
+        trajectory: list[Turn] = []       # every step that ever happened
         sessions: list[list[dict]] = [[]]
         summary = ""
         total_in = total_out = 0
@@ -158,7 +159,9 @@ class AppWorldEngine:
                     observation = self._accept(res, observation, axis)
                     out.compactions_obs += 1
 
-                history.append(Turn(index=step, action=code, observation=observation))
+                turn = Turn(index=step, action=code, observation=observation)
+                history.append(turn)
+                trajectory.append(turn)
                 out.steps = step
 
                 if world.task_completed():
@@ -186,7 +189,7 @@ class AppWorldEngine:
                     world.save_logs()
                 except Exception as e:          # noqa: BLE001
                     out.meta.setdefault("warnings", []).append(f"save_logs: {e}")
-            self._write(task_dir, history, sessions, total_in, total_out, out, policy, cfg)
+            self._write(task_dir, trajectory, sessions, total_in, total_out, out, policy, cfg)
             try:
                 world.close()
             except Exception:
@@ -212,6 +215,11 @@ class AppWorldEngine:
     def _write(task_dir: Path, history: list[Turn], sessions: list[list[dict]],
                total_in: int, total_out: int, out: TaskOutcome,
                policy: CompressionPolicy | None, cfg: EngineConfig) -> None:
+        # Write `trajectory`, never the compressible `history`. The two differ once a
+        # history-axis policy fires: `history` is cleared and replaced by a summary,
+        # so writing it would record only the steps after the last compaction and
+        # Steps -- mean environment interactions -- would be undercounted. Measured
+        # by the smoke test: 10 steps executed, 3 recorded.
         (task_dir / "env_history.json").write_text(json.dumps(
             [{"step": t.index, "action": t.action, "output": t.observation,
               "reward": 0.0, "done": False} for t in history], indent=2))

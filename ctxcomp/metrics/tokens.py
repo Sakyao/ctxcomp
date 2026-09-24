@@ -47,7 +47,21 @@ def _count(enc, text: str) -> int:
 
 
 def task_steps(task_dir: Path) -> int | None:
-    """Environment interactions, i.e. how many times the env was called."""
+    """Environment interactions, i.e. how many times the env was called.
+
+    Prefers results.json's `iterations`, which the engine increments once per
+    interaction and which survives compaction, over the length of
+    env_history.json. The two agree unless something truncates the stored
+    trajectory, and when they disagree the counter is the truth.
+    """
+    rp = task_dir / "results.json"
+    if rp.exists():
+        try:
+            it = json.loads(rp.read_text(errors="replace")).get("iterations")
+            if isinstance(it, int) and it > 0:
+                return it
+        except Exception:
+            pass
     p = task_dir / "env_history.json"
     if not p.exists():
         return None

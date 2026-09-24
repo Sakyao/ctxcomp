@@ -38,6 +38,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -49,6 +50,23 @@ sys.path.insert(0, str(REPO))
 from ctxcomp.llm import ChatClient                      # noqa: E402
 from ctxcomp.methods import build_policy, load_manifest  # noqa: E402
 from ctxcomp.runner import AppWorldEngine, EngineConfig  # noqa: E402
+
+
+def real_now() -> str:
+    """Wall-clock time from outside this process.
+
+    AppWorld installs a time freezer for its simulated tasks, and importing it
+    patches the process clock: after a run, `time.strftime` in the parent returns
+    the last task's frozen datetime (2023-05-18 20:00:00, observed). Asking the OS
+    through a subprocess is unaffected and is worth the fork for a timestamp that
+    has to be true.
+    """
+    try:
+        out = subprocess.run(["date", "+%F %T"], capture_output=True, text=True,
+                             timeout=5).stdout.strip()
+        return out or "unknown"
+    except Exception:
+        return "unknown"
 
 
 def shard(items: list, k: int) -> list[list]:
@@ -152,6 +170,12 @@ def main() -> int:
                     help="AppWorld home. Needed before appworld is imported: the "
                          "package resolves data/tasks and experiments/outputs "
                          "relative to it, and without it load_task_ids raises.")
+    ap.add_argument("--budget-hist", type=int, default=None,
+                    help="Override T_hist from methods.yml. Useful for a threshold "
+                         "sweep, and for forcing a compaction to fire in a smoke "
+                         "test that would otherwise never reach the threshold.")
+    ap.add_argument("--budget-obs", type=int, default=None,
+                    help="Override T_obs from methods.yml.")
     ap.add_argument("--limit", type=int, default=None,
                     help="Run only the first N tasks. For smoke tests and partial "
                          "runs: a single task exercises the loop, the policy call, the "
@@ -258,21 +282,20 @@ def main() -> int:
                 "method": row["name"], "label": row["label"], "axis": row["axis"],
                 "model": model, "served_model": served,
                 "endpoint_fingerprint": fp, "repeat": k,
-                "max_iter": max_iter,
-                "budget_hist": man["thresholds"]["history"],
-                "budget_obs": man["thresholds"]["observation"],
+                "max_iter": max_iter, "budget_hist": th_hist, "budget_obs": th_obs,
                 "api_docs_mode": args.api_docs_mode, "split": split,
                 "verdict": "running",
             }
             (run_dir / "run.inprogress.json").write_text(json.dumps(provisional, indent=2))
 
+            th_hist = args.budget_hist or man["thresholds"]["history"]
+            th_obs = args.budget_obs or man["thresholds"]["observation"]
             cfg_kwargs = {"model": model, "max_iter": max_iter,
-                          "budget_hist": man["thresholds"]["history"],
-                          "budget_obs": man["thresholds"]["observation"],
+                          "budget_hist": th_hist, "budget_obs": th_obs,
                           "api_docs_mode": args.api_docs_mode,
                           "experiment_name": experiment_name}
             t0 = time.time()
-            print(f"[{time.strftime('%F %T')}] start {run_name}", flush=True)
+            print(f"[{real_now()}] start {run_name}", flush=True)
             with ProcessPoolExecutor(max_workers=args.shards) as ex:
                 futs = [ex.submit(worker, (row["name"], s, cfg_kwargs, str(out_dir)))
                         for s in shard(ids, args.shards)]
@@ -290,10 +313,42 @@ def main() -> int:
             # compute_table.py can stay independent of AppWorld's layout.
             verdict, acc = "clean", None
             try:
-                from appworld.evaluator import evaluate_dataset
-                evaluate_dataset(experiment_name=experiment_name,
-                                 dataset_name=split, suppress_errors=True)
+                # evaluate_dataset scores the WHOLE split and raises on the first
+                # task with no dbs/, so a --limit run fails on a task it never ran
+                # (observed: 1 task executed, evaluation died on task 2 of 168).
+                # A partial run is scored per task instead, from the task
+                # directories that exist, and written in the same shape so
+                # compute_table.py does not need to know which case it is.
+                ran = sorted(d.name for d in (run_dir / "tasks").iterdir()
+                             if d.is_dir()) if (run_dir / "tasks").is_dir() else []
                 src = run_dir / "evaluations" / f"{split}.json"
+                if args.limit:
+                    from appworld.evaluator import evaluate_task
+                    ind = {}
+                    for tid in ran:
+                        try:
+                            tracker = evaluate_task(task_id=tid,
+                                                    experiment_name=experiment_name)
+                            rec = {}
+                            if hasattr(tracker, "to_dict"):
+                                rec = tracker.to_dict()
+                            rec["success"] = bool(getattr(tracker, "success", False))
+                            ind[tid] = rec
+                        except Exception as e:          # noqa: BLE001
+                            ind[tid] = {"success": False, "error": str(e)}
+                    src.parent.mkdir(parents=True, exist_ok=True)
+                    n = len(ind)
+                    ok_n = sum(1 for r in ind.values() if r.get("success"))
+                    src.write_text(json.dumps({
+                        "aggregate": {"task_goal_completion":
+                                      round(100 * ok_n / n, 1) if n else 0.0},
+                        "individual": ind,
+                        "_note": f"partial run: {n} task(s) scored individually",
+                    }, indent=2))
+                else:
+                    from appworld.evaluator import evaluate_dataset
+                    evaluate_dataset(experiment_name=experiment_name,
+                                     dataset_name=split, suppress_errors=True)
                 if src.exists():
                     ind = json.loads(src.read_text()).get("individual", {})
                     n = len(ind)
@@ -315,10 +370,10 @@ def main() -> int:
                 "budget_obs": man["thresholds"]["observation"],
                 "api_docs_mode": args.api_docs_mode, "split": split,
                 "seconds": round(elapsed, 1), "verdict": verdict, "acc": acc,
-                "finished_at": time.strftime("%F %T"),
+                "finished_at": real_now(),
             }, indent=2))
             (run_dir / "run.inprogress.json").unlink(missing_ok=True)
-            print(f"[{time.strftime('%F %T')}] done  {run_name}  ({elapsed / 60:.1f} min)")
+            print(f"[{real_now()}] done  {run_name}  ({elapsed / 60:.1f} min)")
             print(f"  next: evaluate, then re-check the backbone signature; "
                   f"a change means this row must be re-run")
 
