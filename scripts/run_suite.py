@@ -152,6 +152,11 @@ def main() -> int:
                     help="AppWorld home. Needed before appworld is imported: the "
                          "package resolves data/tasks and experiments/outputs "
                          "relative to it, and without it load_task_ids raises.")
+    ap.add_argument("--limit", type=int, default=None,
+                    help="Run only the first N tasks. For smoke tests and partial "
+                         "runs: a single task exercises the loop, the policy call, the "
+                         "artefact layout and the evaluator for a fraction of the cost "
+                         "of finding out they are broken 168 times over.")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -171,6 +176,8 @@ def main() -> int:
     max_iter = args.max_iter or man["max_iter"]
     want = set(args.methods.split(",")) if args.methods else None
     ids = list(load_task_ids(split))
+    if args.limit:
+        ids = ids[:args.limit]
     stamp = args.stamp or time.strftime("%Y%m%d_%H%M%S")
     served = served_model_id(model)
     fp = endpoint_fingerprint(served)
@@ -192,7 +199,8 @@ def main() -> int:
               f"({'symlink ok' if bridge.is_symlink() else 'NOT a symlink, leaving it'})",
               file=sys.stderr)
 
-    print(f"[suite {stamp}] {len(ids)} tasks, {args.shards} shards, "
+    print(f"[suite {stamp}] {len(ids)} tasks{(' (limited)' if args.limit else '')}, "
+          f"{args.shards} shards, "
           f"max_iter={max_iter}, repeats={reps}")
     print(f"  results   {runs_root}")
     print(f"  backbone  {served}  (fingerprint {fp})")
