@@ -278,6 +278,9 @@ def main() -> int:
             # expressions to a provisional file moves that failure to second 0. It
             # is deliberately not `run.json`: that file's presence is what makes a
             # re-run skip a completed row, so writing it early would break resume.
+            th_hist = args.budget_hist or man["thresholds"]["history"]
+            th_obs = args.budget_obs or man["thresholds"]["observation"]
+
             provisional = {
                 "method": row["name"], "label": row["label"], "axis": row["axis"],
                 "model": model, "served_model": served,
@@ -288,8 +291,6 @@ def main() -> int:
             }
             (run_dir / "run.inprogress.json").write_text(json.dumps(provisional, indent=2))
 
-            th_hist = args.budget_hist or man["thresholds"]["history"]
-            th_obs = args.budget_obs or man["thresholds"]["observation"]
             cfg_kwargs = {"model": model, "max_iter": max_iter,
                           "budget_hist": th_hist, "budget_obs": th_obs,
                           "api_docs_mode": args.api_docs_mode,
