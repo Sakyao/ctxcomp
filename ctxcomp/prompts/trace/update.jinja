@@ -1,0 +1,41 @@
+<conversation>
+{{ history }}
+</conversation>
+
+<previous-summary>
+{{ prev_summary }}
+</previous-summary>
+
+The messages above are NEW conversation messages to incorporate into the existing summary provided in <previous-summary> tags.
+
+{% raw %}Treat the summary as a working state, not a transcript. For each candidate fact ask: 'will a later step read this and act differently?' If no, drop it. After values are derived (counts, totals, IDs, classifications), carry the result rather than the inputs. Preserve exact literals the agent will paste into a call: unexpired tokens (one per app, drop when the task that needed them is finished), exact descriptions, exact amounts, exact file paths, exact API parameter names that differ from a naive guess, exact recipient identifiers. Drop raw API outputs and intermediate lists that have been summarized; state a fact once and reference it from the others.{% endraw %}
+
+Use this EXACT format:
+
+## Goal
+{% raw %}The supervisor's task in one or two sentences. Quote any literal string the user requires verbatim (request descriptions, comment text, CSV headers, search queries). Add any answer-format constraint (entity or number, no prose) and a terminal `apis.supervisor.complete_task(answer=<value>)` step; when the task does not require an answer, the terminal call still runs (with no answer argument).{% endraw %}
+
+## Constraints & Preferences
+{% raw %}Sources of truth inside the environment that constrain later calls: 'friends, family, roommates, coworkers, manager, brother, sibling, parent, etc.' means phone contacts, retrieved via `apis.phone.search_contacts(access_token, relationship=...)`; personal info, account credentials, addresses and payment cards live in the supervisor app, retrieved via `apis.supervisor.*`; access tokens are short-lived JWTs returned by `<app>.login(username=..., password=...)` and must be passed as the named `access_token` parameter on every authenticated call (sessions are not retained across steps). Plus any literal strings the task requires. Plus any empirically-discovered API correction — a 422 from a wrong parameter name, a response key that returned something different than expected — recorded as the working parameter or key name so future calls do not repeat the mistake.{% endraw %}
+
+## Progress
+{% raw %}Done / In Progress / Blocked. Done = bullets naming the concrete result (an access token, an ID, a count, a classification); do not narrate the steps that produced them. In Progress = the single most immediate action. Blocked = only hard blockers (a required API missing, an environment limitation); drop an entry once resolved.{% endraw %}
+### Done
+{% raw %}{% endraw %}
+
+### In Progress
+{% raw %}{% endraw %}
+
+### Blocked
+{% raw %}{% endraw %}
+
+## Key Decisions
+{% raw %}Each line: 'Decision: one-clause rationale.' Cover only choices a later step might defend or reuse (which app or API, which filter, how an ambiguous phrase such as 'this year' was interpreted). If a decision's consequence is already encoded in Done, Next Steps, or Critical Context, drop the line.{% endraw %}
+
+## Next Steps
+{% raw %}Numbered list. Each step small, independently runnable, written with the exact API call and exact argument values where known. Reference Critical Context for state the step depends on rather than restating it. When the task is complete, the final step is `apis.supervisor.complete_task(answer=<value>)` formatted as just an entity or number; when no answer is needed, pass no answer argument.{% endraw %}
+
+## Critical Context
+{% raw %}Concrete state a later step reuses verbatim: unexpired access tokens (one per app, drop after the task that needed them completes); the working set of IDs to act on next (e.g., payment_request_id list to deny, file paths to move, song IDs to resolve, contact_ids to filter); per-entity cross-references for filters (who qualifies, who does not, with their Venmo/contact info); exact verbatim strings and amounts; empirically-discovered API parameter or response-key corrections. Drop raw API outputs, intermediate values that have been summarized, and credentials no longer needed.{% endraw %}
+
+{% raw %}Drop tokens once the task that needed them is finished. State a fact in one section; reference from the others. Avoid prose the agent will re-emit; prefer tokens, IDs, and short labels. When a working set is empty (all 18 requests approved, all files moved, every payment commented), drop the section that held it rather than carrying it forward. Never duplicate an item across sections.{% endraw %}

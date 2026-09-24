@@ -1,0 +1,128 @@
+# One entry per method. Single source of truth for the whole repo:
+# make_configs.py, run_suite.sh and compute_table.py all read this file.
+#
+# Adding a method = add an entry here + drop its prompt files under
+# ctxcomp/prompts/. make_configs.py refuses to emit a row whose prompt it cannot
+# resolve, because a missing prompt does not fail loudly downstream: the
+# compressor silently falls back to the stock guideline, which would make an
+# "acon_ut" row indistinguishable from "prompting" while still producing a
+# plausible-looking table.
+#
+# kind:
+#   none     no compressor (full history)
+#   history  compress the interaction history
+#   obs      compress observations only
+#
+# policy:
+#   builtin  implemented in ctxcomp/methods/<name>.py
+#   prompt   driven by a prompt directory, same machinery for all of them
+
+benchmark: appworld
+split: test_normal
+model: deepseek-v4.1-flash
+
+# Agent system prompt. Must be the answer-fixed variant: with the stock prompt the
+# agent answers non-questions ("Done.") and fails AppWorld's answer assertion,
+# which depresses every method equally and compresses the differences we are
+# trying to measure.
+prompt_file: prompts/prompts_v1_answerfix.jinja
+
+# Interaction budget per task. AppWorld's own default is 1000; the upstream ACON
+# code hard-codes 50 in four places, which is 1/20 of the environment's own
+# default. Under a 50 budget a task that hits the cap always fails, so the row
+# score collapses to ~1 - (cap-hit rate) and the ranking measures step efficiency
+# rather than context fidelity. Rows are only comparable at equal max_iter.
+max_iter: 1000
+
+# Independent runs per task. 1 gives Acc/Easy/Medium/Hard/Steps/Peak/Dep.
+# 2 additionally gives Pass^2/Pass@2, at double the cost.
+repeats: 1
+
+rows:
+  - name: no_compression
+    label: No compression
+    kind: none
+    policy: builtin
+    source: Full uncompressed history. Reference for behaviour preservation and for Peak/Dep units.
+
+  - name: fifo
+    label: FIFO
+    kind: history
+    policy: builtin
+    keep_last: 5
+    source: >
+      Recency-only sliding window: discard whole turns oldest-first until the
+      compressible history fits. System prompt, task instruction and the last k
+      turns are always kept. Baseline from ACON (Kang et al., ICML 2026).
+
+  - name: llmlingua
+    label: LLMLingua
+    kind: history
+    policy: builtin
+    keep_rate: 0.30
+    source: >
+      Token-level extractive pruning with LLMLingua-2
+      (microsoft/llmlingua-2-xlm-roberta-large-meetingbank), applied to the
+      compressible history. Keep rate 30%, as in the ACON paper.
+
+  - name: prompting_o
+    label: Prompting-O (OpenClaw)
+    kind: history
+    policy: prompt
+    prompts: {dir: openclaw, system: system, first: first, update: update}
+    source: >
+      OpenClaw agent-core compaction, commit 0e7b5c3. Two-stage: a `first`
+      checkpoint prompt, then an `update` prompt that folds new turns into the
+      previous checkpoint. Strongest existing compressed baseline in TRACE
+      (Acc 71.4, vs ACON-UT 62.5).
+
+  - name: prompting_h
+    label: Prompting-H (Hermes)
+    kind: history
+    policy: prompt
+    prompts: {dir: hermes, system: system, first: first, update: update}
+    source: >
+      NousResearch/hermes-agent, commit cca3b77. Head (system + first exchange)
+      and tail protected by token budget, middle summarised. Every checkpoint is
+      prefixed with a REFERENCE ONLY note telling the agent not to re-answer
+      resolved questions and to let the latest user message win on conflict.
+
+  - name: trace
+    label: TRACE
+    kind: history
+    policy: prompt
+    prompts: {dir: trace, system: system_prompt, first: first, update: update}
+    source: >
+      TRACE (Min et al., arXiv 2608.06503). Same benchmark and setting as here:
+      AppWorld test-normal 168 (57/48/63), 4096-token window, frozen backbone.
+      Template is the selected candidate_1 (policy_sha256 94d193fc...), rebuilt
+      with the authors own renderer trace_cc.optimize.policy.build_update_template.
+      candidate_1 is the ITERATIVE-UPDATE prompt; upstream pairs it with the base
+      first-compaction prompt, which is why first.jinja comes from the OpenClaw
+      base and the two are composed into one template.
+
+  - name: acon_ut
+    label: ACON-UT
+    kind: history
+    policy: prompt
+    prompts: {dir: acon_ut, system: system, update: history}
+    source: >
+      ACON utility-optimised guideline. NOTE: this is our own ut1 optimiser run
+      on the AppWorld train split, not the guideline the ACON authors shipped --
+      UT/CO output depends on the trajectories and agent prompt it was optimised
+      against, so two faithful reproductions of the method produce two different
+      texts. Record the guideline sha256 with any result.
+
+  - name: acon_utco
+    label: ACON-UT+CO
+    kind: history
+    policy: prompt
+    prompts: {dir: acon_utco, system: system, update: history}
+    source: >
+      ACON utility+compression-optimised guideline, i.e. the second optimiser
+      stage run on top of the UT guideline. Stage 1 (utility maximisation)
+      maximises success rate; stage 2 (compression maximisation) optimises length
+      on the tasks that already succeed, and writes files prefixed
+      `length_optimized_history_prompt_`. NOT PRESENT YET: only the ut1 stage was
+      ever run locally, so ctxcomp/prompts/acon_utco/ is empty and
+      make_configs.py will refuse to emit this row.
