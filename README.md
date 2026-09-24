@@ -34,8 +34,8 @@ Fifteen rows: one uncompressed reference, and seven methods on each axis.
 | No compression | `no_compression` | — | full context, upper bound |
 | FIFO | `hist_fifo` | `obs_fifo` | whole turns / head+tail truncation |
 | LLMLingua | `hist_llmlingua` | `obs_llmlingua` | token-level extractive pruning, rate 0.30 |
-| **Prompt-O** | `hist_prompt_o` | `obs_prompt_o` | OpenClaw two-stage checkpoint |
-| **Prompt-H** | `hist_prompt_h` | `obs_prompt_h` | Hermes structured checkpoint |
+| **Prompting-O** | `hist_prompting_o` | `obs_prompting_o` | OpenClaw two-stage checkpoint |
+| **Prompting-H** | `hist_prompting_h` | `obs_prompting_h` | Hermes structured checkpoint |
 | TRACE | `hist_trace` | `obs_trace` | verifier-optimised template |
 | ACON-UT | `hist_acon_ut` | `obs_acon_ut` | ACON utility-optimised guideline |
 | ACON-UT+CO | `hist_acon_utco` | `obs_acon_utco` | ACON utility+compression guideline |

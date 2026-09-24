@@ -140,8 +140,8 @@ rows:
       is the row ACON calls observation compression with LLMLingua.
 
   # --------------------------------------------------------------- prompt-O
-  - name: hist_prompt_o
-    label: Prompt-O (history)
+  - name: hist_prompting_o
+    label: Prompting-O (history)
     axis: history
     policy: prompt
     prompts: {dir: openclaw, system: system, first: first, update: update}
@@ -151,8 +151,8 @@ rows:
       previous checkpoint. Named Prompting-O in TRACE, where it is the strongest
       existing compressed baseline (Acc 71.4, vs ACON-UT 62.5).
 
-  - name: obs_prompt_o
-    label: Prompt-O (observation)
+  - name: obs_prompting_o
+    label: Prompting-O (observation)
     axis: observation
     policy: prompt
     prompts: {dir: openclaw, system: system, obs: obs}
@@ -163,8 +163,8 @@ rows:
       being compressed.
 
   # --------------------------------------------------------------- prompt-H
-  - name: hist_prompt_h
-    label: Prompt-H (history)
+  - name: hist_prompting_h
+    label: Prompting-H (history)
     axis: history
     policy: prompt
     prompts: {dir: hermes, system: system, first: first, update: update, prefix: prefix}
@@ -174,8 +174,8 @@ rows:
       prefixed with a REFERENCE ONLY note telling the agent not to re-answer
       resolved questions and to let the latest user message win on conflict.
 
-  - name: obs_prompt_h
-    label: Prompt-H (observation)
+  - name: obs_prompting_h
+    label: Prompting-H (observation)
     axis: observation
     policy: prompt
     prompts: {dir: hermes, system: system, obs: obs, prefix: prefix}

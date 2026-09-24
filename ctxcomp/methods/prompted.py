@@ -1,6 +1,6 @@
 """All prompt-driven methods share this policy, on both axes.
 
-Prompt-O, Prompt-H, TRACE and the ACON variants differ only in their prompt text,
+Prompting-O, Prompting-H, TRACE and the ACON variants differ only in their prompt text,
 so they differ only in this configuration -- one code path, several prompt
 directories. That is deliberate: if each method had its own code path, a
 difference between two rows could come from the plumbing instead of from the

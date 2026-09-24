@@ -90,7 +90,7 @@ Only ACON defines an observation prompt. `obs_acon_ut` uses it verbatim
 (`prompts/acon_ut/obs.jinja`, reproduced from
 `experiments/appworld/prompts/context_opt/prompt_user.jinja`).
 
-OpenClaw, Hermes and TRACE are all history-only, so `obs_prompt_o`, `obs_prompt_h`
+OpenClaw, Hermes and TRACE are all history-only, so `obs_prompting_o`, `obs_prompting_h`
 and `obs_trace` use templates derived from each project's own history prompt,
 keeping its preservation criteria and moving them onto the single-observation task.
 Each derived file carries a header saying so, and so does the row's `source`. The

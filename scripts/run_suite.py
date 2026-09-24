@@ -175,6 +175,14 @@ def main() -> int:
     print(f"[suite {args.stamp}] {len(ids)} tasks, {args.shards} shards, "
           f"max_iter={max_iter}, repeats={reps}, backbone={sig}")
 
+    required = {"name", "label", "axis", "policy"}
+    missing = [(r.get("name", "?"), sorted(required - set(r))) for r in man["rows"]
+               if required - set(r)]
+    if missing:
+        for name, keys in missing:
+            print(f"  malformed row {name}: missing {keys}", file=sys.stderr)
+        raise SystemExit("fix methods.yml before running")
+
     for row in man["rows"]:
         if want and row["name"] not in want:
             continue
@@ -243,7 +251,7 @@ def main() -> int:
                 verdict = f"evaluation_failed: {type(e).__name__}: {e}"
                 print(f"  [!] evaluation failed: {e}")
             (run_dir / "run.json").write_text(json.dumps({
-                "method": row["name"], "label": row["label"], "kind": row["kind"],
+                "method": row["name"], "label": row["label"], "axis": row["axis"],
                 "model": model, "endpoint_signature": sig, "repeat": k,
                 "max_iter": max_iter, "history_budget": args.history_budget,
                 "api_docs_mode": args.api_docs_mode, "split": split,
