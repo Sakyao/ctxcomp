@@ -207,6 +207,24 @@ def main() -> int:
 
             out_dir = run_dir / split
             out_dir.mkdir(parents=True, exist_ok=True)
+
+            # Evaluate every field the run record needs BEFORE any task starts.
+            # Twice now a manifest field was renamed and one write site was missed,
+            # which raises only when the row finishes -- hours in. Writing the same
+            # expressions to a provisional file moves that failure to second 0. It
+            # is deliberately not `run.json`: that file's presence is what makes a
+            # re-run skip a completed row, so writing it early would break resume.
+            provisional = {
+                "method": row["name"], "label": row["label"], "axis": row["axis"],
+                "model": model, "endpoint_signature": sig, "repeat": k,
+                "max_iter": max_iter,
+                "budget_hist": man["thresholds"]["history"],
+                "budget_obs": man["thresholds"]["observation"],
+                "api_docs_mode": args.api_docs_mode, "split": split,
+                "verdict": "running",
+            }
+            (run_dir / "run.inprogress.json").write_text(json.dumps(provisional, indent=2))
+
             cfg_kwargs = {"model": model, "max_iter": max_iter,
                           "budget_hist": man["thresholds"]["history"],
                           "budget_obs": man["thresholds"]["observation"],
@@ -253,11 +271,14 @@ def main() -> int:
             (run_dir / "run.json").write_text(json.dumps({
                 "method": row["name"], "label": row["label"], "axis": row["axis"],
                 "model": model, "endpoint_signature": sig, "repeat": k,
-                "max_iter": max_iter, "history_budget": args.history_budget,
+                "max_iter": max_iter,
+                "budget_hist": man["thresholds"]["history"],
+                "budget_obs": man["thresholds"]["observation"],
                 "api_docs_mode": args.api_docs_mode, "split": split,
                 "seconds": round(elapsed, 1), "verdict": verdict, "acc": acc,
                 "finished_at": time.strftime("%F %T"),
             }, indent=2))
+            (run_dir / "run.inprogress.json").unlink(missing_ok=True)
             print(f"[{time.strftime('%F %T')}] done  {run_name}  ({elapsed / 60:.1f} min)")
             print(f"  next: evaluate, then re-check the backbone signature; "
                   f"a change means this row must be re-run")
