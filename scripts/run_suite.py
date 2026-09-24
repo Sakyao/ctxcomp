@@ -214,7 +214,14 @@ def main() -> int:
             print(f"  skip  {row['name']}: {type(e).__name__}: {e}")
             continue
         for k in range(1, reps + 1):
-            rep = "" if reps == 1 else f"__r{k}"
+            # Always suffixed, even for a single repeat. Without the suffix a
+            # --repeats 1 pass and a later --repeats 2 pass name their first
+            # repeat differently, and a second pass meant to backfill Pass^2 /
+            # Pass@2 would be counted as an extra repeat instead of joining the
+            # first. Backfilling is a real workflow here: the two columns are the
+            # only reason to pay for a second pass, and it is better to be able to
+            # defer that decision than to have to commit before the first one.
+            rep = f"__r{k}"
             # Row names already carry the axis (hist_* / obs_*), so the directory
             # name does not repeat it: an extra prefix would let a row be renamed
             # in the manifest while its old name lived on in every stored run.
