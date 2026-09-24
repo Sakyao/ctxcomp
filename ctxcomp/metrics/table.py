@@ -1,11 +1,11 @@
 """Assemble the results table.
 
-Run directory contract, produced by run_suite.sh:
+Run directory contract, produced by run_suite.py:
 
-    runs/<stamp>/<method>__r<k>/          k > 1 only when repeats > 1
-        run.json                          method, model, endpoint signature, timings
-        evaluations/<split>.json          AppWorld's evaluator output
-        <split>/task_<id>/                the trajectory artefacts
+    runs/<stamp>/<method>__<served_model>[__r<k>]/
+        run.json                          method, model, fingerprint, verdict, acc
+        evaluations/<split>.json          AppWorld's scorer output
+        tasks/<task_id>/                  trajectory artefacts, beside dbs/
 
 Everything here is derived from those artefacts. Nothing is read from a log,
 because a log line can be written by the wrong process -- which has already
@@ -89,8 +89,13 @@ def summarise(run_dirs: list[Path], split: str) -> dict:
         tot += 1
 
     tok = run_token_stats(run_dirs[-1], split)
-    sigs = {run_meta(r).get("endpoint_signature") for r in run_dirs}
-    verdicts = {run_meta(r).get("verdict") for r in run_dirs}
+    metas = [run_meta(r) for r in run_dirs]
+    # Report the serving backbone alongside the verdict, because it is the one
+    # thing a reader needs to judge whether a row is comparable with its
+    # neighbours: the endpoint here has been redeployed four times in a day.
+    backbones = {(m.get("served_model"), m.get("endpoint_fingerprint"))
+                 for m in metas if m.get("served_model")}
+    verdicts = {m.get("verdict") for m in metas}
     return {
         "ok": True, "reps": reps, "tasks": n,
         "acc": 100 * sum(accs) / len(accs),
@@ -100,7 +105,7 @@ def summarise(run_dirs: list[Path], split: str) -> dict:
         "peak": tok.get("avg_peak_tokens"),
         "dep": tok.get("avg_dependency"),
         "levels": {k: (_pct(v[1], v[0]), v[0]) for k, v in per_level.items()},
-        "sigs": sorted(s for s in sigs if s),
+        "backbones": sorted(f"{s} ({f})" for s, f in backbones),
         "contaminated": "CONTAMINATED" in verdicts,
     }
 
@@ -124,10 +129,10 @@ def render(rows: list[tuple[str, dict]], stamp: str, split: str) -> str:
         mark = " ⚠️" if s.get("contaminated") else ""
         lines.append("| " + " | ".join(cells) + mark + " |")
     lines += ["", "_Peak in 10^3, Dep. in 10^6. Steps = environment interactions. "
-                  "Pass^2 / Pass@2 require repeats >= 2._", "", "## endpoint signatures", ""]
+                  "Pass^2 / Pass@2 require repeats >= 2._", "", "## backbone and provenance", ""]
     for label, s in rows:
         if s.get("ok"):
-            lines.append(f"- {label}: `{'`, `'.join(s['sigs']) or 'unknown'}` "
+            lines.append(f"- {label}: {', '.join(s['backbones']) or 'unknown'} "
                          f"· {s['reps']} run(s) · {s['tasks']} tasks"
                          + (" · **CONTAMINATED**" if s.get("contaminated") else ""))
     return "\n".join(lines) + "\n"

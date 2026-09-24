@@ -34,15 +34,15 @@ baselines were originally measured on:
 
 Artefacts, and who reads them:
 
-    ctxcomp, for Steps/Peak/Dep     <output_dir>/task_<id>/{env_history,
-                                    llm_history,token_usage_and_cost,results}.json
-    AppWorld's evaluator, for Acc   <APPWORLD_ROOT>/experiments/outputs/
-                                    <experiment_name>/tasks/<task_id>/{dbs,logs,...}
+    Steps / Peak / Dep   <output_dir>/<task_id>/{env_history,llm_history,
+                         token_usage_and_cost,results}.json
+    Acc (the evaluator)  <output_dir>/<task_id>/{dbs,logs,...} and, one level up,
+                         evaluations/<split>.json
 
-The second set is written by AppWorld itself once `experiment_name` is set, which
-is why it is not duplicated here: the evaluator verifies a task by replaying the
-final database state (`dbs/`) against ground truth, and it will only look under its
-own experiment directory.
+`output_dir` is `<run_dir>/tasks`, so both sets land in the same folder. It has to
+be split at the writer level -- the evaluator verifies a task by replaying the
+final database state (dbs/) against ground truth and only AppWorld can produce it
+-- but it is one directory on disk, which is what matters when reading a result.
 """
 from __future__ import annotations
 
@@ -123,7 +123,11 @@ class AppWorldEngine:
         world = AppWorld(task_id=task_id, experiment_name=cfg.experiment_name,
                          max_interactions=cfg.max_iter)
         out = TaskOutcome(task_id=task_id)
-        task_dir = Path(cfg.output_dir or ".") / f"task_{task_id}"
+        # Same folder AppWorld writes dbs/ and logs/ into: one task's whole record,
+        # metrics and environment state, side by side. The id is not prefixed with
+        # "task_" because AppWorld does not prefix it, and a second naming scheme
+        # would put the two halves of a run in different directories again.
+        task_dir = Path(cfg.output_dir or ".") / task_id
         task_dir.mkdir(parents=True, exist_ok=True)
 
         instruction = world.task.instruction

@@ -94,15 +94,20 @@ def task_peak_dep(task_dir: Path, enc=None) -> tuple[int, float] | None:
 
 
 def run_token_stats(run_dir: Path, split: str) -> dict:
-    """Aggregate Steps / Peak / Dep over the tasks of one run."""
-    tasks_dir = run_dir / split
+    """Aggregate Steps / Peak / Dep over the tasks of one run.
+
+    Reads <run_dir>/tasks/<task_id>/ -- the same folder AppWorld's dbs/ and logs/
+    live in. Task ids are bare ("3d9a636_1"), not prefixed, because AppWorld's
+    evaluator keys its results that way and the two have to agree on the name.
+    """
+    tasks_dir = run_dir / "tasks"
     if not tasks_dir.is_dir():
         tasks_dir = run_dir
     enc = _encoding()
     steps, peaks, deps = [], [], []
     for t in sorted(os.listdir(tasks_dir)):
         td = tasks_dir / t
-        if not td.is_dir() or not t.startswith("task_"):
+        if not td.is_dir():
             continue
         s = task_steps(td)
         if s is not None:

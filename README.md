@@ -57,25 +57,6 @@ observation prompt is ACON's own `P_obs`, used verbatim by `obs_acon_ut`.
 Provenance, upstream commits and licence notes are in `docs/METHODS.md` and
 `docs/CREDITS.md`.
 
-## Metrics
-
-Reported per method, matching what the two source papers print so the numbers are
-directly comparable:
-
-| metric | definition |
-|---|---|
-| **Avg Acc** | mean task success over `repeats` independent runs |
-| **Pass²** | fraction solved in **all** runs — multi-run reliability |
-| **Pass@2** | fraction solved in **at least one** run — task coverage |
-| **Easy / Medium / Hard** | per-difficulty success (57 / 48 / 63 tasks) |
-| **Steps** | mean environment interactions per task |
-| **Peak** | max input context length over all steps, **including** the system prompt, in 10³ tokens |
-| **Dep.** | `Σ_t ((n_i + 2·n_o)·n_o)/2` with `n_i` **excluding** the system prompt, in 10⁶ |
-
-`Acc`/`Peak`/`Dep` follow the ACON paper's Table 1; `Pass²`/`Pass@2` follow TRACE's
-Table 1. Both are computed here from the trajectory rather than trusted from a log
-line, so they can be recomputed for any past run.
-
 ## Usage
 
 ```bash
@@ -94,19 +75,77 @@ evidence instead of silently averaging two models together.
 `--repeats 1`, so a first pass is cheap and the reliability columns can be filled
 by a second pass later (runs are stored per repeat and joined afterwards).
 
+## Where results go
+
+One method-run produces one folder. Everything a run produces is in it:
+
+```
+runs/<timestamp>/<method>__<served_model>/
+    run.json                          method, axis, served model, backbone
+                                      fingerprint, verdict, seconds, Acc
+    evaluations/<split>.json          AppWorld's scorer output
+    evaluations/<split>.txt           the same, human-readable
+    tasks/<task_id>/
+        env_history.json              one entry per environment interaction
+        llm_history.json              per-call messages; Peak and Dep read this
+        token_usage_and_cost.json
+        results.json                  steps, cap hit, compaction counts, config echo
+        dbs/  logs/  checkpoints/     AppWorld's own: the final database state the
+        misc/ version/                evaluator replays to decide success
+```
+
+The metric files sit beside `dbs/` rather than in a tree of their own, because they
+are the same run. ACON's harness scattered them across two roots and bridged them
+with a symlink, which is why Acc and Steps/Peak/Dep could not be read from one
+place; that is not repeated here.
+
+`<timestamp>` defaults to `YYYYMMDD_HHMMSS` so successive rounds never overwrite
+each other. `<served_model>` is the id the endpoint actually serves, not what the
+manifest asked for — the server rejects names it has not loaded.
+
+AppWorld's evaluator will only look under `<APPWORLD_ROOT>/experiments/outputs`, and
+`experiment_name` may be a relative path, so runs are named `<stamp>/<run_name>` and
+a symlink at `<APPWORLD_ROOT>/experiments/outputs/<stamp>` resolves back into this
+repository. The results are stored once; the second path is a link.
+
+The behavioural fingerprint of the backbone is recorded in `run.json`, not in the
+directory name: it is evidence of *which weights answered* — the only value that
+distinguished two redeployments sharing a model name — but it changes whenever the
+serving configuration does, and a directory that renamed itself mid-experiment
+would be unusable.
+
+## Metrics
+
+| metric | definition |
+|---|---|
+| **Avg Acc** | mean task success over `repeats` independent runs |
+| **Pass^2** | fraction solved in **all** runs — multi-run reliability |
+| **Pass@2** | fraction solved in **at least one** run — task coverage |
+| **Easy / Medium / Hard** | per-difficulty success (57 / 48 / 63 tasks) |
+| **Steps** | mean environment interactions per task |
+| **Peak** | max input context length over all steps, **including** the system prompt, in 10³ tokens |
+| **Dep.** | `Σ_t ((n_i + 2·n_o)·n_o)/2` with `n_i` **excluding** the system prompt, in 10⁶ |
+
+Acc, difficulty and the evaluator's verdict come from AppWorld's scorer, which
+replays the final database state against ground truth. Steps, Peak and Dep are
+recomputed here from the stored trajectories, so a past run can be re-scored without
+re-running the agent and a change in definition does not silently mix with old
+numbers.
+
 ## Layout
 
 ```
 methods.yml              the single source of truth: one entry per method
 ctxcomp/
-  methods/               one CompressionPolicy per method
+  methods/               one CompressionPolicy per (method, axis)
   prompts/               prompt templates, one directory per prompt-driven method
   metrics/tokens.py      Steps / Peak / Dep
   metrics/table.py       the table above
-  runner/                AppWorld execution adapter
-  configs/               generated per-method configs (do not edit by hand)
-scripts/                 make_configs.py, run_suite.sh, compute_table.py
-docs/                    methods, provenance, credits, experiment log
+  metrics/difficulty.py  the environment's own Easy/Medium/Hard labels
+  runner/                AppWorld execution loop, both axes
+scripts/                 check_methods.py, run_suite.py, compute_table.py
+docs/                    methods, provenance, credits, design
+runs/                    results, one folder per round (gitignored)
 ```
 
 ## Status
