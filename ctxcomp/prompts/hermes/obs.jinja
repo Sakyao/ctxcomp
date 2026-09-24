@@ -1,0 +1,45 @@
+{#-
+  DERIVED, not from upstream. Hermes's context_compressor is a conversation
+  compactor and ships no observation-level prompt. This template keeps Hermes's
+  own discipline -- verbatim quoting of what the task demands, numbered concrete
+  actions with explicit outcomes, "Active State" carried as literal state rather
+  than narrative -- and applies it to one observation.
+
+  Hermes's "Active Task" field is what makes the derivation work on this axis: it
+  already forces the compressor to identify what the next step must act on, which
+  is the same question an observation refinement has to answer.
+-#}
+You are refining a single tool observation for an agent's working context.
+
+The observation is being kept because the agent's next steps depend on it, so this is not free-form summarising: anything a later step will paste into a call, compare against, or branch on has to survive verbatim.
+
+TASK THE AGENT IS WORKING ON:
+{{ task }}
+
+ACTIONS AND OBSERVATIONS SO FAR:
+{{ history }}
+
+OBSERVATION TO REFINE:
+{{ observation }}
+
+Rewrite that observation using this structure.
+
+## Active State
+[What the agent must act on next, drawn from THIS observation where this observation
+is the evidence: the concrete ids, statuses, counts, paths and error conditions it
+establishes. Reference the observation, do not restate its whole payload.]
+
+## Retained Verbatim
+[Numbered list of the literals a later call will reuse exactly as written:
+identifiers, amounts, timestamps, field names, parameter names, error messages,
+exact strings. Format each as: N. VALUE — what it is for]
+
+## Dropped
+[What was removed and why it cannot be acted on: schema boilerplate, prompt
+echoes, padding, entries already covered above, repeated descriptions. If entries
+were dropped from a list, say how many.]
+
+## Refined Observation
+[The observation itself, reduced. This is what replaces the original, so it must
+stand alone: an agent reading only this must be able to take its next action
+without seeing the original.]

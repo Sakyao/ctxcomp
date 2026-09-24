@@ -1,0 +1,36 @@
+{#-
+  ACON's observation-compression prompt (P_obs), reproduced verbatim from
+  experiments/appworld/prompts/context_opt/prompt_user.jinja.
+
+  Authentic, not derived. Note the input triple (task, history, observation) and
+  the output shape: a "Refined Observation" section. Both differ from P_hist,
+  which takes (task, previous summary, history) and emits a structured checkpoint.
+  ACON optimises P_hist and P_obs separately, so they are not interchangeable.
+
+  Variables rendered by ctxcomp.methods.prompted.PromptedPolicy:
+    task         the user instruction
+    history      the interaction history BEFORE the current observation (h_{t-1})
+    observation  the current observation (o_t), the thing being compressed
+-#}
+Your task is to generate a "Reasoning" and a "Refined Observation" based on the inputs below.
+
+In the "Reasoning", analyze the user instruction and history to identify what information from the current observation is necessary to complete the remaining steps.
+Think about what parts can be summarized or transformed to reduce length, while ensuring that future actions can still be executed based on the refined observation alone.
+
+In the "Refined Observation", include only the information that is minimal but sufficient for the next steps.
+
+[Information source]
+# User Instruction
+{{ task }}
+
+# History of interactions
+{{ history }}
+
+# Observation at the current time step
+{{ observation }}
+
+[Output format]
+# Reasoning
+... your reasoning for what matters and how to optimize it ...
+# Refined Observation
+... reduced and actionable observation ...

@@ -1,0 +1,41 @@
+{#-
+  DERIVED, not from upstream. OpenClaw's agent-core compaction is a conversation
+  summarizer and ships no observation-level prompt. This template keeps OpenClaw's
+  own preservation discipline -- exact paths, names, error messages; no invention;
+  no continuing the conversation -- and moves it onto the single-observation task
+  that ACON equation (4) defines.
+
+  Why not reuse the history template: it emits a structured checkpoint with Goal /
+  Progress / Next Steps sections, which is a summary of a conversation. Handing
+  that back in place of an observation would replace a tool reply with a project
+  status, which is a different method.
+-#}
+<observation>
+{{ observation }}
+</observation>
+
+<current-task>
+{{ task }}
+</current-task>
+
+<work-so-far>
+{{ history }}
+</work-so-far>
+
+The observation above is the reply from the most recent tool call, and it is too long to keep in full. Produce a refined version of that observation, and nothing else.
+
+RULES:
+- Keep every value the agent will need for its next actions: exact ids, paths, field names, counts, statuses, timestamps and error messages, verbatim.
+- Drop what cannot be acted on: boilerplate, repeated schema descriptions, prompt echoes, padding, and entries already covered by <work-so-far>.
+- If the observation is a list, keep the entries that matter and say how many were omitted. Do not silently summarise a list into a count.
+- If the observation contains an error or a refusal, keep it in full. A dropped error causes the same call to be retried forever.
+- Do NOT invent values. Anything not present in the observation must not appear in the refinement.
+- Do NOT continue the task, answer questions, or propose next steps. Only rewrite the observation.
+
+Use this EXACT format:
+
+# Reasoning
+[What the next steps need from this observation, and what can be dropped]
+
+# Refined Observation
+[The refined observation]

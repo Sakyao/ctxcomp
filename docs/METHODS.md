@@ -56,3 +56,44 @@ keep their original shape.
 - **`api_docs_mode`** decides whether the per-task API documentation is pasted in
   whole. It is ~100k tokens for a sampled task, and it is the reason the
   uncompressed row is expensive. The setting is recorded in `results.json`.
+
+## The two axes
+
+ACON compresses the history and the observations, and reports them as two separate
+AppWorld lines. They are not two settings of one method:
+
+| | history | observation |
+|---|---|---|
+| equation | (3) `h'_t = f(h_t; P_hist)` | (4) `o'_t = f(o_t, h_{t-1}; P_obs)` |
+| fires on | the accumulated history | the **current** observation |
+| fires when | `|h_t| > T_hist` | `|o_t| > T_obs` |
+| threshold | 4096 | 1024 |
+| prompt input | `(task, prev_summary, history)` | `(task, history, observation)` |
+| prompt output | a structured checkpoint | a refined observation |
+
+`P_hist` and `P_obs` are optimised separately, so a row is a (method, axis) pair.
+
+Two consequences worth keeping in mind:
+
+- **A history row and an observation row are not comparable.** The history row
+  replaces what the agent remembers; the observation row replaces what the agent
+  just read. A table that mixes them along one axis is measuring two different
+  interventions.
+- **Observation compression is not observation masking or a recency window.** By
+  equation (4) it acts on the current observation and conditions on the history, so
+  the mechanism has to reduce one observation's length. Dropping old observations
+  is a different method, and implementing it here would mislabel the row.
+
+### Where the observation prompts come from
+
+Only ACON defines an observation prompt. `obs_acon_ut` uses it verbatim
+(`prompts/acon_ut/obs.jinja`, reproduced from
+`experiments/appworld/prompts/context_opt/prompt_user.jinja`).
+
+OpenClaw, Hermes and TRACE are all history-only, so `obs_prompt_o`, `obs_prompt_h`
+and `obs_trace` use templates derived from each project's own history prompt,
+keeping its preservation criteria and moving them onto the single-observation task.
+Each derived file carries a header saying so, and so does the row's `source`. The
+alternative — one generic observation prompt shared by three methods — would make
+three rows identical while presenting them as three different methods, which is
+worse than an honest derivation.

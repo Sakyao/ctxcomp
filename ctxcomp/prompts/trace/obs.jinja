@@ -1,0 +1,48 @@
+{#-
+  DERIVED, not from upstream. TRACE addresses history compression only and
+  publishes no observation prompt. This template keeps TRACE's own selection rule
+  verbatim because it is exactly the right rule for this axis:
+
+      "For each candidate fact ask: will a later step read this and act
+       differently? If no, drop it."
+
+  and keeps its list of what must survive: exact literals the agent will paste
+  into a call. TRACE's history format is a working-state summary; an observation
+  refinement is the same judgement applied to one API reply, so the criteria carry
+  over unchanged while the output shape has to differ.
+-#}
+<observation>
+{{ observation }}
+</observation>
+
+<current-task>
+{{ task }}
+</current-task>
+
+<work-so-far>
+{{ history }}
+</work-so-far>
+
+The observation above is a raw API reply that is too long to keep. Reduce it.
+
+Treat it as evidence for the remaining steps, not as a record. For each candidate
+fact ask: 'will a later step read this and act differently?' If no, drop it.
+
+Preserve exact literals the agent will paste into a call: identifiers and the ids a
+later call takes as arguments, exact amounts, exact timestamps, exact file paths,
+exact API parameter names that differ from a naive guess, unexpired tokens, and any
+error message or status code. After values are derived (counts, totals, ids,
+classifications), carry the result rather than the inputs.
+
+Drop the scaffolding: schema and field descriptions, prompt echoes, repeated
+boilerplate, entries already stated in <work-so-far>, and intermediate values that
+have been summarised. State a fact once. Never duplicate across the two output
+sections.
+
+Use this EXACT format:
+
+# Reasoning
+[For the entries you dropped, the test you applied: what would the next step have done differently if it had seen them]
+
+# Refined Observation
+[The reduced observation: what the next call needs, with exact literals]

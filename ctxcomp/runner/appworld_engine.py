@@ -1,33 +1,48 @@
 """Reference execution loop: one AppWorld task, one compression policy.
 
-Deliberately owned here rather than delegated, because the compaction boundary is
-the object of study. The loop is:
+Owned here rather than delegated, because the compaction boundary is the object of
+study. The loop applies both axes:
 
-    build context -> ask the model -> execute the code -> record the turn
-    -> if the compressible history exceeds the budget, hand it to the policy and
-       continue from the policy's replacement text
+    ask the model -> execute the code -> [observation axis] -> record the turn
+                  -> [history axis] -> continue
 
-The policy never sees the environment, the tools or the evaluator; it only sees
-the history and returns text. Everything else is frozen, which is what makes two
-rows comparable.
+    observation  o'_t = f(o_t, h_{t-1}; P_obs)   if |o_t| > T_obs   (eq. 4)
+                 applied to the observation BEFORE it enters the history, which is
+                 what equation (4) means: the refinement is conditioned on the
+                 history so far, and the raw observation never reaches the agent.
+                 Getting this order wrong -- recording first and refining later --
+                 would compress an observation the agent has already read.
 
-Two notes on fidelity, because they are the difference between this loop and the
-harness the baselines were originally measured on:
+    history      h'_t = f(h_t; P_hist)           if |h_t| > T_hist  (eq. 3)
+                 applied after the turn is recorded, because the history that trips
+                 the threshold includes it.
 
-* `api_docs` is per task and can be very large (425 KB for one sampled task,
-  roughly 100k tokens). `api_docs_mode: full` reproduces a harness that pastes it
-  in whole, which is what makes the uncompressed row genuinely expensive;
-  `instruction-only` is the cheap variant. The choice is recorded in results.json
-  because it changes the meaning of Peak and Dep.
-* Compaction is triggered on characters here, not tokens, to keep the boundary
-  dependency-free. The budget is therefore approximate; it is recorded with every
-  run so that a later exact-token implementation can be told apart from this one.
+The policy never sees the environment, the tools or the evaluator; it only sees the
+compressible input and returns text. Everything else is frozen, which is what makes
+two rows comparable.
 
-Artifacts are written in the shape ctxcomp.metrics expects:
-    env_history.json              one entry per environment interaction
-    llm_history.json              per-call message lists (Peak and Dep read this)
-    token_usage_and_cost.json     call and token counters
-    results.json                  steps, cap, compaction count, config echo
+Fidelity notes, since they are the difference between this loop and the harness the
+baselines were originally measured on:
+
+* `api_docs` is per task and can be very large (425 KB for a sampled task, roughly
+  100k tokens). `api_docs_mode: full` reproduces a harness that pastes it in whole,
+  which is what makes the uncompressed row genuinely expensive;
+  `instruction-only` is the cheap variant. Recorded in results.json because it
+  changes the meaning of Peak and Dep.
+* Compaction triggers on characters, not tokens, to keep the boundary
+  dependency-free. The budget is therefore approximate and is recorded per run.
+
+Artefacts, and who reads them:
+
+    ctxcomp, for Steps/Peak/Dep     <output_dir>/task_<id>/{env_history,
+                                    llm_history,token_usage_and_cost,results}.json
+    AppWorld's evaluator, for Acc   <APPWORLD_ROOT>/experiments/outputs/
+                                    <experiment_name>/tasks/<task_id>/{dbs,logs,...}
+
+The second set is written by AppWorld itself once `experiment_name` is set, which
+is why it is not duplicated here: the evaluator verifies a task by replaying the
+final database state (`dbs/`) against ground truth, and it will only look under its
+own experiment directory.
 """
 from __future__ import annotations
 
@@ -77,6 +92,26 @@ def build_context(instruction: str, api_docs: str, history: list[Turn],
     return "\n\n".join(parts)
 
 
+def span_chars(history: list[Turn]) -> int:
+    return sum(len(t.action) + len(t.observation) for t in history)
+
+
+def _compress(policy: CompressionPolicy, instruction: str, history: list[Turn],
+              summary: str, cfg: EngineConfig, observation: str = ""):
+    """Call the policy on the axis it declares.
+
+    The axis is read from the policy, never inferred from which threshold tripped:
+    a policy that declares `history` must not receive an observation request, even
+    if an observation happens to be over budget.
+    """
+    axis = getattr(policy, "axis", "history")
+    budget = cfg.budget_obs if axis == "observation" else cfg.budget_hist
+    req = CompressionRequest(task=instruction, axis=axis, history=list(history),
+                             observation=observation, prev_summary=summary,
+                             budget=budget, is_first=(summary == ""))
+    return policy.compress(req)
+
+
 class AppWorldEngine:
     def __init__(self, llm: ChatClient | None = None):
         self.llm = llm or ChatClient()
@@ -94,6 +129,7 @@ class AppWorldEngine:
         instruction = world.task.instruction
         api_docs = str(world.task.api_docs) if cfg.api_docs_mode == "full" else ""
         system = cfg.agent_prompt or DEFAULT_AGENT_PROMPT
+        axis = getattr(policy, "axis", None) if policy is not None else None
 
         history: list[Turn] = []
         sessions: list[list[dict]] = [[]]
@@ -109,8 +145,16 @@ class AppWorldEngine:
                 total_out += len(reply) // 4
 
                 code = extract_code(reply)
-                obs = world.execute(code)
-                history.append(Turn(index=step, action=code, observation=obs))
+                observation = world.execute(code)
+
+                # observation axis, before the observation enters the history
+                if axis == "observation" and len(observation) > cfg.budget_obs * 4:
+                    res = _compress(policy, instruction, history, summary, cfg,
+                                    observation=observation)
+                    observation = self._accept(res, observation, axis)
+                    out.compactions_obs += 1
+
+                history.append(Turn(index=step, action=code, observation=observation))
                 out.steps = step
 
                 if world.task_completed():
@@ -119,26 +163,46 @@ class AppWorldEngine:
                     out.hit_cap = True
                     break
 
-                # Compaction boundary: only the compressible span is handed over.
-                span = sum(len(t.action) + len(t.observation) for t in history)
-                if policy is not None and span > cfg.history_budget * 4:
-                    req = CompressionRequest(
-                        task=instruction, history=history, prev_summary=summary,
-                        budget=cfg.history_budget, is_first=(summary == ""))
-                    res = policy.compress(req)
-                    summary = res.text
-                    history = []            # replaced by the summary
-                    sessions.append([])     # new session, mirroring the harness
-                    out.compactions += 1
-        except Exception as e:              # noqa: BLE001 - recorded, not swallowed
+                # history axis, after the turn is recorded
+                if axis == "history" and span_chars(history) > cfg.budget_hist * 4:
+                    res = _compress(policy, instruction, history, summary, cfg)
+                    summary = self._accept(res, summary, axis)
+                    history = []                # replaced by the summary
+                    sessions.append([])         # new session, mirroring the harness
+                    out.compactions_hist += 1
+        except Exception as e:                  # noqa: BLE001 - recorded, not swallowed
             out.error = f"{type(e).__name__}: {e}"
         finally:
+            if cfg.save_appworld_artifacts:
+                # The evaluator reads tasks/<task_id>/dbs to verify the task against
+                # ground truth. AppWorld maintains dbs itself while APIs execute;
+                # save_logs adds the api-call and environment-io logs, which are
+                # what make a failure diagnosable after the fact.
+                try:
+                    world.save_logs()
+                except Exception as e:          # noqa: BLE001
+                    out.meta.setdefault("warnings", []).append(f"save_logs: {e}")
             self._write(task_dir, history, sessions, total_in, total_out, out, policy, cfg)
             try:
                 world.close()
             except Exception:
                 pass
         return out
+
+    @staticmethod
+    def _accept(res, fallback: str, axis: str) -> str:
+        """Take the policy's replacement, refusing a mismatch instead of corrupting.
+
+        A policy that returns `replaces: history` while the runner asked for an
+        observation has misunderstood the axis. Substituting a summary for an
+        observation would look like a working run and produce meaningless numbers.
+        """
+        if getattr(res, "replaces", axis) != axis:
+            raise ValueError(
+                f"policy {getattr(res, 'strategy', '?')} returned a "
+                f"{getattr(res, 'replaces', '?')!r} replacement while the runner "
+                f"asked for {axis!r}")
+        return res.text if res.text.strip() else fallback
 
     @staticmethod
     def _write(task_dir: Path, history: list[Turn], sessions: list[list[dict]],
@@ -156,9 +220,13 @@ class AppWorldEngine:
             {"iterations": out.steps, "task_id": out.task_id,
              "info": {"success": None,
                       "reason": "max_interactions" if out.hit_cap else "finished"},
-             "compactions": out.compactions, "error": out.error,
+             "compactions": {"history": out.compactions_hist,
+                             "observation": out.compactions_obs},
+             "error": out.error, "warnings": out.meta.get("warnings", []),
              "config": {"max_iter": cfg.max_iter, "model": cfg.model,
-                        "history_budget": cfg.history_budget,
+                        "budget_hist": cfg.budget_hist,
+                        "budget_obs": cfg.budget_obs,
                         "api_docs_mode": cfg.api_docs_mode,
                         "policy": getattr(policy, "name", None),
+                        "axis": getattr(policy, "axis", None),
                         "experiment_name": cfg.experiment_name}}, indent=2))
