@@ -129,6 +129,19 @@ echo "[suite $STAMP] model=$MODEL split=$SPLIT shards=$SHARDS max_iter=$MAX_ITER
 SIG="$(sig)"
 echo "[suite $STAMP] serving backbone signature: $SIG"
 
+# Which dataset the evaluator walks. It evaluates every task the dataset lists, so a
+# run that covered only the tasks named by --task-ids has to be evaluated against a
+# dataset listing just those. Pointed at the full split it stops at the first task
+# that was never run and reports that task's missing dbs, which reads like the row
+# failed when in fact the row was never asked to cover it.
+EVAL_DATASET="$SPLIT"
+if [ -n "$TASK_IDS" ]; then
+  EVAL_DATASET="ctxc_${STAMP}"
+  mkdir -p "$AW/data/datasets"
+  printf '%s\n' $TASK_IDS > "$AW/data/datasets/${EVAL_DATASET}.txt"
+  echo "[suite $STAMP] evaluating against dataset ${EVAL_DATASET}"
+fi
+
 while IFS=$'\t' read -r kind name cfg; do
   [ -z "$name" ] && continue
   in_filter "$name" || continue
@@ -149,7 +162,7 @@ while IFS=$'\t' read -r kind name cfg; do
     # "<...>/tasks/<id>/dbs does not exist", and the table then shows a dash for a
     # row that really did execute. `run_id` is the directory, `run_tag` is the tag.
     run_id="${MODEL//\//_}_${run_tag}"
-    marker="$EXP/experiments/outputs/$run_id/evaluations/${SPLIT}.json"
+    marker="$EXP/experiments/outputs/$run_id/evaluations/${EVAL_DATASET}.json"
     if [ -f "$marker" ]; then echo "  done  $run_id"; continue; fi
     if [ "$DRY" = 1 ]; then echo "  plan  $run_id  cfg=${cfg:-none}"; continue; fi
 
@@ -216,7 +229,7 @@ PY
     if [ -d "$aw_out" ] && [ ! -e "$link" ] && [ ! -L "$link" ]; then
       mkdir -p "$EXP/experiments/outputs"; ln -s "$aw_out" "$link"
     fi
-    ( cd "$EXP" && "$PY" -m appworld.cli evaluate "$run_id" "$SPLIT" ) \
+    ( cd "$EXP" && "$PY" -m appworld.cli evaluate "$run_id" "$EVAL_DATASET" ) \
         > "$LOGDIR/suite_${STAMP}_${name}${REP}_eval.log" 2>&1 \
       || echo "  [!] evaluation failed for $run_id"
 

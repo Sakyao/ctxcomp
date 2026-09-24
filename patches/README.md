@@ -91,3 +91,29 @@ zero modified tracked files. Runtime artefacts go to a *different* path,
 environment's data and output root, addressed through `APPWORLD_ROOT`.
 
 No `trace` repository is checked out anywhere under this home directory.
+
+---
+
+## 4. `experiments/suite/` has moved here — no new patch
+
+Item 2 above listed `experiments/suite/` as a superseded prototype that "should move
+here or be deleted". It has moved here: `methods.yml`, `make_configs.py`,
+`run_suite.sh` and `compute_table.py` now live at this repository's root, and the
+suite drives the ACON checkout through `ACON_ROOT` instead of sitting inside it.
+
+**This adds no modification to ACON.** The patch set stays the five files in item 1;
+`grep -rn "LOCAL PATCH"` still finds all of them. The only things this repository
+writes into the ACON tree are runtime artefacts: the generated subset datasets under
+`data/datasets/` (`ctxc_<stamp>.txt`, used to evaluate a partial run against a
+partial dataset) and the run output ACON already wrote there.
+
+Two defects in the old prototype were fixed during the move, both in this
+repository's copies and neither in ACON:
+
+- `methods.yml` named `./prompts/prompts_v1_answerfix.jinja`, which does not exist;
+  the file that works is the JSON, and a real run in this checkout records
+  `./prompts/prompts_v1_answerfix.json`.
+- `run_suite.sh` evaluated by the bare tag while AppWorld's directory is
+  `<model>_<tag>`, so evaluation could never find the run; and its
+  `run_suite.sh`-generated table pattern required a `-` before the row name, which
+  axis-qualified names (`hist_*`, `obs_*`) do not have.

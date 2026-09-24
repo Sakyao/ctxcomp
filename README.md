@@ -138,31 +138,28 @@ compression method, the agent, the budget or the metric.
    resolve, because a missing prompt does not fail loudly: the compressor falls back
    to its stock guideline and the row silently becomes a different method.
 
-## Known gap: evaluation cannot read the databases
+## Evaluation
 
-`run_suite.sh` runs a row, then calls `appworld.cli evaluate`. The run currently
-fails at that second step:
+`run_suite.sh` runs a row and then hands it to AppWorld's own evaluator. AppWorld
+persists each task's database on every `execute`, and the evaluator replays those
+databases against ground truth, so Acc is AppWorld's number and not one derived
+here. Two details are easy to get wrong:
 
-```
-Exception: The from_db_home_path
-./experiments/outputs/<run>/tasks/<task_id>/dbs does not exist.
-```
+* **The evaluator walks every task the dataset lists.** A row that covered fewer
+  tasks than the dataset names fails on the first uncovered one, reporting that
+  task's missing `dbs` — which reads like the row failed when it was never asked to
+  cover that task. `--task-ids` therefore evaluates against a generated subset
+  dataset (`ctxc_<stamp>`) rather than the full split, and
+  `compute_table.py --eval-dataset` reads that file. A full round uses
+  `test_normal`, which every row covers.
+* **The run directory is `<model>_<tag>`, not the tag.** AppWorld prefixes the
+  experiment name with the model, and the evaluator is addressed by that directory
+  name. Pointing it at the bare tag is a silent mismatch: the run succeeds, the
+  evaluation cannot find the database, and the table shows a dash for a row that
+  really did execute. `run_suite.sh` keeps tag and directory separate for this
+  reason.
 
-The cause is on the harness side, not here. AppWorld keeps each task's SQLite state
-in memory and only persists it through `_save_state(...)`, and
-`AppWorld.close()` calls `clear_local_dbs_cache(task_id)` — so whether a task stays
-evaluable depends on a save having happened at the right point. In the ACON checkout
-this suite drives, a completed task leaves `llm_history.json`, `env_history.json` and
-`results.json` behind but **no `dbs/` directory anywhere**, so there is nothing for
-the evaluator to replay.
+Verified end to end on one task (`--task-ids`), which produced
+`evaluations/ctxc_<stamp>.json` and a table row carrying Acc, Steps, Peak, Dep and
+the difficulty band; the full 168-task split is the same path with `test_normal`.
 
-Consequences, stated plainly:
-
-* `Steps` / `Peak` / `Dep.` are unaffected — they come from `llm_history.json`.
-* **`Avg Acc`, `Pass^2`, `Pass@2` and the difficulty split cannot be produced** until
-  the state is persisted. `compute_table.py` prints `-` for them rather than a number
-  that would look measured but is not.
-* Fixing it requires a change in the ACON checkout (persisting the state before
-  close, or pointing the evaluator at wherever it lands), which has to be recorded
-  in `patches/` like every other local edit — it is deliberately not worked around
-  inside this repository, because a metric re-derived here would not be AppWorld's.

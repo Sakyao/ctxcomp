@@ -51,12 +51,13 @@ def load_methods() -> list[tuple[str, str]]:
 
 
 def find_runs(stamp: str, name: str) -> list[Path]:
-    # AppWorld names the run directory "<model>_<tag>", and the tag is what carries
-    # the row name, so the pattern has to allow the "<model>_" prefix. Matching
-    # "<name>__" alone would find nothing and print a table of dashes that looks
-    # like every row failed.
+    # AppWorld names the run directory "<model>_<tag>" and the tag begins with the
+    # row name, so the pattern allows an arbitrary prefix. It deliberately does not
+    # require a "-" before the name the way upstream's did: the row name is already
+    # axis-qualified (hist_*, obs_*), and demanding that hyphen matches nothing and
+    # prints a table of dashes that reads like every row failed.
     pat = str(REPO / "experiments" / "appworld" / "experiments" / "outputs"
-              / f"*-{name}__*__sb-*__{stamp}*")
+              / f"*{name}__*__sb-*__{stamp}*")
     return sorted(Path(p) for p in glob.glob(pat) if Path(p).is_dir())
 
 
@@ -103,8 +104,15 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--stamp", required=True)
     ap.add_argument("--split", default="test_normal")
+    ap.add_argument(
+        "--eval-dataset", default=None,
+        help="Which dataset the evaluator walked. Defaults to --split. A smoke run "
+             "evaluated against a subset writes evaluations/<eval-dataset>.json, "
+             "while Steps/Peak/Dep still come from the --split output directory.",
+    )
     ap.add_argument("--methods", default=None)
     args = ap.parse_args()
+    eval_dataset = args.eval_dataset or args.split
     want = set(args.methods.split(",")) if args.methods else None
 
     hdr = ["Method", "Avg Acc", "Pass^2", "Pass@2", "Steps", "Peak", "Dep.",
@@ -122,7 +130,7 @@ def main() -> int:
             ledger.append((label, "no runs"))
             continue
 
-        per_run = [read_eval(r, args.split) for r in runs]
+        per_run = [read_eval(r, eval_dataset) for r in runs]
         sigs = set()
         verdicts = []
         for r in runs:
