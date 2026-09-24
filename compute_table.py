@@ -33,13 +33,18 @@ from collections import defaultdict
 from pathlib import Path
 
 SUITE = Path(__file__).resolve().parent
-# The runs and the analysis tools are both in the ACON checkout: Steps/Peak/Dep come
-# from analysis_tools.analyze_experiment_tokens_v2, which is the implementation the
-# numbers were measured with, and Acc comes from AppWorld's own evaluator output
-# sitting beside each run. Nothing here recomputes a metric its own way.
-ACON = Path(os.environ.get("ACON_ROOT", "/z5s/morph/home/sjk/Agent/datasets/repos/acon"))
-REPO = ACON
-sys.path.insert(0, str(ACON))
+# The analysis tools are vendored here: Steps/Peak/Dep come from
+# analysis_tools.analyze_experiment_tokens_v2 -- the implementation the numbers were
+# measured with -- which resolves the run directories from its own location, i.e. this
+# repository's experiments/appworld/outputs. Nothing here recomputes a metric its own
+# way.
+REPO = SUITE
+sys.path.insert(0, str(REPO))
+
+# The AppWorld root: the benchmark's data and the evaluator's reports. Separate from
+# the repository because it is the environment's own directory, shared by every run
+# and not owned by this suite.
+AW = Path(os.environ.get("APPWORLD_ROOT", "/z5s/morph/home/sjk/Agent/datasets/appworld-0.1.0"))
 
 SPLIT_COUNTS = {"1": ("Easy", 57), "2": ("Medium", 48), "3": ("Hard", 63)}
 
@@ -51,13 +56,16 @@ def load_methods() -> list[tuple[str, str]]:
 
 
 def find_runs(stamp: str, name: str) -> list[Path]:
-    # AppWorld names the run directory "<model>_<tag>" and the tag begins with the
-    # row name, so the pattern allows an arbitrary prefix. It deliberately does not
-    # require a "-" before the name the way upstream's did: the row name is already
-    # axis-qualified (hist_*, obs_*), and demanding that hyphen matches nothing and
-    # prints a table of dashes that reads like every row failed.
-    pat = str(REPO / "experiments" / "appworld" / "experiments" / "outputs"
-              / f"*{name}__*__sb-*__{stamp}*")
+    # Runs live under the AppWorld root, not inside the repository: the evaluator
+    # writes its report to <APPWORLD_ROOT>/experiments/outputs/<run>/evaluations,
+    # because that is the root it was given. Looking inside the repository would find
+    # nothing and print a table of dashes that reads like every row failed.
+    #
+    # The run directory is "<model>_<tag>" and the tag begins with the row name, so
+    # the pattern allows an arbitrary prefix. It deliberately does not require a "-"
+    # before the name the way upstream's did: row names are already axis-qualified
+    # (hist_*, obs_*) and demanding that hyphen matches nothing.
+    pat = str(AW / "experiments" / "outputs" / f"*{name}__*__sb-*__{stamp}*")
     return sorted(Path(p) for p in glob.glob(pat) if Path(p).is_dir())
 
 

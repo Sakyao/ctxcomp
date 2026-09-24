@@ -8,5 +8,16 @@ configs/
 # the current directory. Binary, machine-local, and regenerated on demand.
 analysis/
 
+# Run artefacts written by the vendored harness. run_all.py writes ./outputs and
+# AppWorld writes ./experiments (dbs and evaluation reports) relative to its entry
+# point; both are per-run and regenerated, so neither is tracked.
+experiments/appworld/outputs/
+experiments/appworld/experiments/
+experiments/appworld/shards/
+experiments/appworld/error.log
+
+# A symlink to the AppWorld install's data directory, created by run_suite.sh.
+experiments/appworld/data
+
 .venv/
 .pytest_cache/

@@ -99,7 +99,8 @@ No `trace` repository is checked out anywhere under this home directory.
 Item 2 above listed `experiments/suite/` as a superseded prototype that "should move
 here or be deleted". It has moved here: `methods.yml`, `make_configs.py`,
 `run_suite.sh` and `compute_table.py` now live at this repository's root, and the
-suite drives the ACON checkout through `ACON_ROOT` instead of sitting inside it.
+harness those files drive is vendored here too (`src/`, `experiments/`; see
+`vendor/PROVENANCE.md`) instead of being reached from the upstream checkout.
 
 **This adds no modification to ACON.** The patch set stays the five files in item 1;
 `grep -rn "LOCAL PATCH"` still finds all of them. The only things this repository

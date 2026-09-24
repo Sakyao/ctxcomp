@@ -1,33 +1,38 @@
 # ctxcomp — a comparison suite for context compression on AppWorld
 
 This repository owns the **suite**: the manifest, the prompt assets, the driver, and
-the results table. It does not own the **harness**. Every row is executed, unchanged,
-by the code in the ACON checkout named by `ACON_ROOT`, which is where each baseline
-has lived all along:
+the results table. It also carries the **harness** — a verbatim copy of the code that
+executes each baseline — so a round can be run from this repository alone, and the
+upstream checkout stays what it should be: the reference the copy is diffed against.
 
-| layer | where it actually runs |
+| layer | where it runs |
 |---|---|
-| compressor | `ACON_ROOT/src/productive_agents/ctxopt/{history,obs}_optimizer.py` |
-| trigger | `ACON_ROOT/src/productive_agents/agents/memory.py` |
-| agent loop | `ACON_ROOT/src/productive_agents/agents/unified_agent.py` |
-| entry point | `ACON_ROOT/experiments/appworld/run_all.py` |
+| compressor | `src/productive_agents/ctxopt/{history,obs}_optimizer.py` |
+| trigger | `src/productive_agents/agents/memory.py` |
+| agent loop | `src/productive_agents/agents/unified_agent.py` |
+| entry point | `experiments/appworld/run_all.py` |
+| metric implementation | `experiments/analysis_tools/utils.py` |
 
-That split is deliberate. A baseline re-implemented here could differ from itself
-between runs, and a comparison table cannot contain that. The only file in this
-repository that adapts anything is `make_configs.py`, and only where upstream's own
-generator cannot express an observation row at all — see its docstring.
+`vendor/PROVENANCE.md` records the upstream commit, the file list and a digest of the
+vendored trees. The copy is not a re-implementation and not a tidy-up: it is
+byte-identical to upstream, including the five `[LOCAL PATCH]` edits without which the
+harness cannot reach a self-hosted model (see `patches/README.md`). The one file in
+this repository that adapts anything is `make_configs.py`, and only where upstream's
+own generator cannot express an observation row at all — see its docstring.
 
 ## Quick start
 
 ```bash
-export ACON_ROOT=/z5s/morph/home/sjk/Agent/datasets/repos/acon   # the harness
-
 python make_configs.py                # methods.yml -> configs/<row>/<row>.yaml
-bash   run_suite.sh --methods hist_fifo --shards 8      # run rows, evaluate them
+bash   run_suite.sh --methods hist_fifo --shards 8      # run rows, then evaluate them
 python compute_table.py --stamp <stamp>                 # assemble the table
 ```
 
 `run_suite.sh --dry-run` prints the plan without touching the endpoint.
+
+The one external path a round needs is `APPWORLD_ROOT` — the benchmark install holding
+`data/`, the evaluator and the run artefacts. It defaults to the local one, and it is
+the only thing outside this repository that the work reads.
 
 ## Two axes, not one
 
@@ -124,10 +129,11 @@ the evaluator, never from a log line.
 
 ## Changes made outside this repository
 
-`patches/` records every edit made inside the ACON checkout, with the reason and the
-command to revert. They are marked `[LOCAL PATCH]` in the source, so
-`grep -rn "LOCAL PATCH" $ACON_ROOT` finds all of them. None of them changes a
-compression method, the agent, the budget or the metric.
+`patches/` records every edit that was made inside the upstream checkout, with the
+reason and the command to revert. They are marked `[LOCAL PATCH]` in the source, so
+`grep -rn "LOCAL PATCH" src experiments` finds all of them: the vendored copy carries
+them, because without them the harness cannot reach a self-hosted model at all. None of
+them changes a compression method, the agent, the budget or the metric.
 
 ## Adding a method
 

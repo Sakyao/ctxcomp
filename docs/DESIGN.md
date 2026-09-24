@@ -3,17 +3,23 @@
 ## The split
 
 ```
-ctxcomp (this repository)                 ACON checkout (ACON_ROOT)
-  methods.yml      the manifest             src/productive_agents/ctxopt/   compressors
-  make_configs.py  manifest -> co_config    src/productive_agents/agents/memory.py    trigger
-  run_suite.sh     shards, fingerprint,     src/productive_agents/agents/unified_agent.py  loop
-                   run, evaluate            experiments/appworld/run_all.py entry point
-  compute_table.py the table                experiments/analysis_tools/    metric definitions
-  prompts/         prompt assets
+ctxcomp (this repository)
+  methods.yml        the manifest
+  make_configs.py    manifest -> co_config
+  run_suite.sh       shards, fingerprint, run, evaluate
+  compute_table.py   the table
+  prompts/           compression prompt assets
+
+  src/productive_agents/          vendored: compressors, memory manager, agent loop
+  experiments/appworld/           vendored: entry point, agent prompt, configs
+  experiments/analysis_tools/     vendored: Steps / Peak / Dep
+  experiments/repro/              vendored: the LLMLingua service, the fingerprint probe
+  vendor/                         provenance, digest, and the re-sync script
 ```
 
 The suite knows what to compare and how to read the result; the harness knows how to
-run a policy. Every row is executed by the baseline's own code, so a baseline cannot
+run a policy. The harness is **vendored rather than referenced**, so a round runs from
+this repository alone — and **vendored rather than rewritten**, so a baseline cannot
 drift from its published implementation by being re-expressed here.
 
 This was not the first shape of the repository. An earlier draft re-implemented the
@@ -67,5 +73,5 @@ re-scored after the fact and the definition is auditable in one place.
 
 Every metric here is defined on AppWorld's artefacts — its evaluator, its difficulty
 labels, its interaction count. A second benchmark is not a flag; it is a second
-`ACON_ROOT`-side entry point plus a metric reader, and the honest version of that
+entry point plus a metric reader, and the honest version of that
 work starts by finding out whether the harness already exposes those three things.

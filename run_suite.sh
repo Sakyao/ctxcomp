@@ -31,12 +31,13 @@
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-# This repository owns the suite, not the harness. Every row is executed by the code
-# in the ACON checkout it was audited against, so a baseline cannot drift from its
-# own implementation by being re-implemented here. Point ACON_ROOT elsewhere to
-# reproduce against a different checkout; nothing else in this file assumes a path.
-ACON="${ACON_ROOT:-/z5s/morph/home/sjk/Agent/datasets/repos/acon}"
-REPO="$ACON"
+# The harness is vendored into this repository, byte-identical to the upstream
+# checkout it was taken from (vendor/PROVENANCE.md records the commit and the file
+# digests): src/productive_agents is ACON's compressor, memory manager and agent
+# loop; experiments/appworld is its entry point; experiments/analysis_tools is the
+# metric implementation. Nothing below reads the upstream checkout at run time --
+# it is kept only as the reference the vendored copy is diffed against.
+REPO="$HERE"
 EXP="$REPO/experiments/appworld"
 PY="${PY:-/z5s/morph/home/sjk/Agent/envs/ci1/bin/python}"
 LOGDIR="${ACON_LOGDIR:-/z5s/morph/home/sjk/Agent/datasets/logs}"
@@ -52,6 +53,13 @@ export PYTHONPATH="$REPO/src:${PYTHONPATH:-}"
 export ACON_LOCAL_EMBEDDING_URL="${ACON_LOCAL_EMBEDDING_URL:-http://127.0.0.1:9200/v1}"
 export ACON_LLM_RETRIES="${ACON_LLM_RETRIES:-6}"
 export ACON_LLM_BACKOFF="${ACON_LLM_BACKOFF:-1.5}"
+
+# analysis_tools.get_task_difficulty reads a task's difficulty from
+# data/tasks/<id>/ground_truth/metadata.json under its own root -- that is,
+# experiments/appworld/data. That directory belongs to the AppWorld install, not to
+# this repository, so it is linked rather than copied. Without it every task grades as
+# 'unknown' and the Easy/Medium/Hard columns come out empty.
+if [ ! -e "$EXP/data" ]; then ln -s "$AW/data" "$EXP/data"; fi
 
 STAMP=""; FILTER=""; SHARDS=""; MAX_ITER=""; REPEATS=""; TASK_IDS=""; DRY=0
 while [ $# -gt 0 ]; do
@@ -224,12 +232,12 @@ for base in (pathlib.Path(exp, "outputs", run_id),
 print(f"  signature {before} -> {after}  [{verdict}]")
 PY
 
-    aw_out="$AW/experiments/outputs/$run_id"
-    link="$EXP/experiments/outputs/$run_id"
-    if [ -d "$aw_out" ] && [ ! -e "$link" ] && [ ! -L "$link" ]; then
-      mkdir -p "$EXP/experiments/outputs"; ln -s "$aw_out" "$link"
-    fi
-    ( cd "$EXP" && "$PY" -m appworld.cli evaluate "$run_id" "$EVAL_DATASET" ) \
+    # The evaluator takes its root from --root and needs the AppWorld data directory
+    # (./data) underneath it. Passing APPWORLD_ROOT explicitly is what makes this
+    # independent of the working directory: with the default root (".") it looks for
+    # ./data under experiments/appworld, does not find it there, and refuses to start
+    # -- a failure that has nothing to do with the run it was asked to score.
+    ( cd "$EXP" && "$PY" -m appworld.cli evaluate "$run_id" "$EVAL_DATASET" --root "$AW" ) \
         > "$LOGDIR/suite_${STAMP}_${name}${REP}_eval.log" 2>&1 \
       || echo "  [!] evaluation failed for $run_id"
 
