@@ -25,11 +25,46 @@ published methods they are attached to; `methods.yml` says `DERIVED` in each row
 
 ## TRACE
 
-The TRACE repository (`nokia-applied-research/Trace`) carries **no licence file**,
-and its own README states this and advises adding one before distributing. The
-template used here was therefore rebuilt from the released policy data with the
-authors' own renderer, and is attributed to the paper rather than copied from the
-repository. Do not vendor that repository's code into this one.
+The template used here is `candidate_1` from the TRACE repository
+(`nokia-applied-research/Trace`) — the one the paper's authors took to their
+end-to-end runs — rendered with their own renderer and checked against it:
+
+| our file | produced by | check |
+|---|---|---|
+| `prompts/trace/update.jinja` | `trace_cc.optimize.policy.build_update_template(candidate_1.json, base_update_text())` | byte-identical |
+| `prompts/trace/first.jinja` | `data/compression_policy_base/first_summary.jinja` | byte-identical |
+| `prompts/trace/system_prompt.jinja` | `data/compression_policy_base/system_prompt.jinja` | byte-identical |
+
+`policy_sha(candidate_1)` is `94d193fcc6f96e12027b18212bce88bc320dcb55f31d34bd2ec4bd976d6c59ea`,
+the hash that repository's `manifest.json` records. The two base templates are also
+byte-identical to the ones under `prompts/openclaw/`, which is what the paper means by
+its harness "adapting OpenClaw's recurrent compaction loop": `prompting_o` and `trace`
+are the same loop with and without the eleven optimised slots.
+
+The repository carries **no licence file**, and its own README says so and advises
+adding one before distributing. Nothing from it is vendored here: the template was
+rendered from the published policy and is attributed to the paper.
+
+### Execution-layer differences from the TRACE paper
+
+This row runs on the suite's shared harness, not on TRACE's own. After reading their
+reference implementation (`trace_cc/core.py`, `optimize/loop.py`,
+`collect/runner.py`), the divergences are:
+
+| | TRACE | here |
+|---|---|---|
+| compression threshold | 4096 | 4096 |
+| turns kept raw | `preserve_last_k_turns = 1` | 1 |
+| first vs update | `prev_summary is None` → `first_summary.jinja`, and "no previous summary is ever fabricated" | `prev_summary == ''` → `{% if prev_summary %}` branch |
+| summary wrapper | `<history_summary>…</history_summary>` | `<HISTORY_SUMMARY>…</HISTORY_SUMMARY>` |
+| history rendering | `reasoning` + fenced code + `Output:` | `USER:` / `ASSISTANT:` |
+
+The last two rows are the real divergence, and they are deliberately not corrected: a
+row executed by its own private loop would no longer be comparable with the other rows
+in the table. TRACE's own `collect/runner.py` states the constraint this reproduces —
+rollouts through "a different adapter will not be byte-identical", because "prompt
+assembly and tool-call formatting differ". TRACE numbers from this suite and from the
+paper are therefore two cohorts, not two measurements of one thing.
 
 ## AppWorld
 
