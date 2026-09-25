@@ -61,6 +61,12 @@ Reproduced verbatim: PDF line breaks rejoined, page numbers and headers removed,
 nothing paraphrased. Appendix E.1–E.4 are the optimiser's own analysis and update
 prompts — machinery, not guidelines — and are not used here.
 
+The template files carry **no annotation of their own** — no provenance header, no
+comment block. They are the paper's text and nothing else, so a byte-level comparison
+against Appendix E is meaningful. Their provenance (which Prompt, which axis, which
+stage) is recorded here and in each row's `source:` in `methods.yml`, never inside the
+templates.
+
 **Superseded local artefacts.** An earlier state of this repository used candidates
 from a local optimiser run. Those candidates had never been through the stage the
 paper describes ("sample 5 candidate prompts and select the one that performs best on

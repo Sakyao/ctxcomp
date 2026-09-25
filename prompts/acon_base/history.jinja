@@ -1,17 +1,3 @@
-{#-
-  ACON P_hist, BEFORE optimisation -- paper Appendix E, "Prompt E.5: AppWorld
-  Prompt for history compression before optimization" (arXiv 2510.00615).
-
-  Reproduced verbatim, with the two-column line breaks of the PDF rejoined and the
-  page numbers removed. Not used by any row: it is here as the starting point the
-  optimised guidelines in acon_ut/ and acon_utco/ were derived from, so the
-  difference between "before" and "after" can be read directly.
-
-  Variables rendered by the harness (history_optimizer.py::_build_history_prompt):
-    task          the user instruction
-    prev_summary  the previous checkpoint, empty on the first compaction
-    history       USER:/ASSISTANT: rendering of the compressible span
--#}
 You are maintaining a structured context-aware summary for a productivity agent. You will be given the user instruction for the agent, a list of interactions corresponding to actions taken by the agent, and the most recent previous summary if one exists. Produce the following:
 
 ### REASONING

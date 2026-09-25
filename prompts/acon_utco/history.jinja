@@ -1,16 +1,3 @@
-{#-
-  ACON-UT+CO P_hist -- paper Appendix E, "Prompt E.7: AppWorld Prompt for history
-  compression after optimization (UTCO)" (arXiv 2510.00615).
-
-  Reproduced verbatim: PDF line breaks rejoined, page numbers removed. Note the
-  `max_chars` default of 1500, which the paper's template carries and the harness
-  does not pass -- the default is therefore what takes effect, as in the paper.
-
-  Variables rendered by the harness (history_optimizer.py::_build_history_prompt):
-    task          the user instruction
-    prev_summary  the previous checkpoint, empty on the first compaction
-    history       USER:/ASSISTANT: rendering of the compressible span
--#}
 You maintain a compact, state-preserving HISTORY_SUMMARY for a multi-session agent.
 
 Input:

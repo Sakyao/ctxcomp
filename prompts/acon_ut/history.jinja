@@ -1,17 +1,3 @@
-{#-
-  ACON-UT P_hist -- paper Appendix E, "Prompt E.6: AppWorld Prompt for history
-  compression after optimization (UT)" (arXiv 2510.00615).
-
-  Reproduced verbatim: PDF line breaks rejoined, page numbers removed, nothing
-  paraphrased. This is the authors' own optimised guideline, so it is the object the
-  ACON-UT row is supposed to measure -- see README "Where the ACON guidelines come
-  from" for why this replaced the locally optimised candidate.
-
-  Variables rendered by the harness (history_optimizer.py::_build_history_prompt):
-    task          the user instruction
-    prev_summary  the previous checkpoint, empty on the first compaction
-    history       USER:/ASSISTANT: rendering of the compressible span
--#}
 You maintain a compact, state-preserving HISTORY_SUMMARY for a multi-session agent.
 
 Input:
