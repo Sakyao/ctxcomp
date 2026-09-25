@@ -1,36 +1,42 @@
 {#-
-  ACON's observation-compression prompt (P_obs), reproduced verbatim from
-  experiments/appworld/prompts/context_opt/prompt_user.jinja.
+  ACON-UT P_obs -- paper Appendix E, "Prompt E.9: AppWorld Prompt for observation
+  compression after optimization (UT)" (arXiv 2510.00615).
 
-  Authentic, not derived. Note the input triple (task, history, observation) and
-  the output shape: a "Refined Observation" section. Both differ from P_hist,
-  which takes (task, previous summary, history) and emits a structured checkpoint.
-  ACON optimises P_hist and P_obs separately, so they are not interchangeable.
+  Reproduced verbatim: PDF line breaks rejoined, page numbers removed. The
+  unoptimised counterpart (Prompt E.8) is kept at prompts/acon_base/obs.jinja, so the
+  difference between the two is readable without the paper.
 
-  Variables rendered by ctxcomp.methods.prompted.PromptedPolicy:
+  Variables rendered by the harness (obs_optimizer.py::_build_optimization_prompt):
     task         the user instruction
-    history      the interaction history BEFORE the current observation (h_{t-1})
-    observation  the current observation (o_t), the thing being compressed
+    history      the interaction history before the current observation
+    observation  the current observation, the thing being compressed
 -#}
-Your task is to generate a "Reasoning" and a "Refined Observation" based on the inputs below.
-
-In the "Reasoning", analyze the user instruction and history to identify what information from the current observation is necessary to complete the remaining steps.
-Think about what parts can be summarized or transformed to reduce length, while ensuring that future actions can still be executed based on the refined observation alone.
-
-In the "Refined Observation", include only the information that is minimal but sufficient for the next steps.
-
+Your task: write two sections---"Reasoning" and "Refined Observation".
+1. Reasoning
+- Examine task, history, and observation.
+- Decide exactly which parts of the observation must be kept so the next agent step can succeed.
+- Note any need to paginate (page_limit default = 5, page_index).
+- Justify any data you drop.
+2. Refined Observation
+- Contain only the minimal yet sufficient info for the next step.
+- Always preserve:
+- Every endpoint that may be called, plus its full parameter list and defaults (especially page_limit/page_index, auth tokens).
+- Response-schema fields referenced or likely needed later (e.g., play_count, release_date, like_count, position, ids).
+- Raw data rows required for future comparisons or loops; if summarising, keep at least all positive-match examples.
+- Never:
+- Omit defaults that affect behaviour.
+- Declare parameters "not critical" without proof.
+- Hallucinate endpoints or fields.
+- Replace machine-readable data with vague prose.
 [Information source]
 # User Instruction
 {{ task }}
-
 # History of interactions
 {{ history }}
-
 # Observation at the current time step
 {{ observation }}
-
 [Output format]
 # Reasoning
-... your reasoning for what matters and how to optimize it ...
+...concise analysis explaining what is kept/removed...
 # Refined Observation
-... reduced and actionable observation ...
+...trimmed yet complete observation ensuring future steps remain possible...

@@ -1,87 +1,48 @@
-You are maintaining a structured context-aware summary for a productivity agent. You will be given the user instruction for the agent, a list of interactions corresponding to actions taken by the agent, and the most recent previous summary if one exists. Produce the following:
+{#-
+  ACON-UT+CO P_hist -- paper Appendix E, "Prompt E.7: AppWorld Prompt for history
+  compression after optimization (UTCO)" (arXiv 2510.00615).
 
-### REASONING
-Summarize key progress, decisions made, important observed outcomes, and rationale behind actions taken so far. Include how earlier steps influenced later ones and why certain data is retained in the summary.
+  Reproduced verbatim: PDF line breaks rejoined, page numbers removed. Note the
+  `max_chars` default of 1500, which the paper's template carries and the harness
+  does not pass -- the default is therefore what takes effect, as in the paper.
 
-### COMPLETED
-List completed subtasks or successful outcomes, with brief results if applicable.
+  Variables rendered by the harness (history_optimizer.py::_build_history_prompt):
+    task          the user instruction
+    prev_summary  the previous checkpoint, empty on the first compaction
+    history       USER:/ASSISTANT: rendering of the compressible span
+-#}
+You maintain a compact, state-preserving HISTORY_SUMMARY for a multi-session agent.
 
----
+Input:
+[USER INSTRUCTION] {{ task }}
+[PREVIOUS SUMMARY] {{ prev_summary }}
+[HISTORY OF INTERACTIONS] {{ history }}
 
-## [Information Source]
+Summary Compression Rules:
+- Collapse multi-bullet narratives into <=2 concise sentences.
+- Replace repetitive step logs with one summarizing phrase.
+- Truncate long token/credential strings to "<token>" unless verbatim reuse is required.
+- Remove unused/expired credentials, page_index/page_limit, verbose API dumps, and table borders.
+- Shrink GUARDRAILS to one bullet unless multiple items are still critical.
+- Delete tool/API log output, greetings, meta prose, and section headers that no longer contain content.
+- Keep only variables actively referenced in upcoming steps; list each once in VARS.
+- Reference removal categories [repetition], [tool-logs], [meta], [formatting] to prune similar lines.
+- Preserve factual continuity; never invent or alter state variables.
+- Target summaries well under {{ max_chars | default(1500) }} characters.
 
-### USER INSTRUCTION
+Critical Essentials:
+Always keep evidence-driven items required next session (e.g., tokens, ids, emails, amounts, lists, paths, description strings, brief task status).
 
-{{ task }}
-
-## [PREVIOUS SUMMARY] (if any)
-
-{{ prev_summary }}
-
-## [HISTORY OF INTERACTIONS]
-
-{{ history }}
-
----
-
-## PRIORITIZE
-
-1. Keep all sections relevant and concise.  
-2. Use reusable structured formats when summarizing artifacts.  
-3. Ensure agent can resume task with no loss of information.
-4. Include key info from errors or failed attempts to prevent repeated mistakes.
-5. Preserve all essential artifacts and data needed to complete the task.
-
----
-
-## COMPRESSION RULES (apply strictly)
-
-1. **Preserve the task type and completion contract.** Explicitly state whether the task requires an answer. If the task is an action (e.g., follow, send, create, compress, delete) and does not ask for a specific piece of information, write verbatim: "No answer is required for this task; call `complete_task()` without an `answer` argument." Do not allow any later interpretation to add an answer.
-
-2. **Preserve exact API names, parameters, and access tokens.** If any API call, parameter, or token (e.g., `access_token`, `page_index`) appears in the history, include it exactly as used. Never omit or paraphrase these, as they are required to resume without re-discovery.
-
-3. **Preserve the exact remaining actions and final call.** In the COMPLETED section, if the task is not fully done, add a "Next Steps" subsection listing the exact remaining actions, including the final `complete_task()` call with its correct signature (with or without `answer`).
-
-4. **Do not add or infer an answer argument.** If the original task or baseline behavior shows `complete_task()` called with no arguments, preserve that fact explicitly. Never summarize that an answer was provided unless it was actually provided in the history.
-
-5. **Prevent instruction drift.** If the history shows the agent deviating from the task (e.g., adding an answer when none is required, or misinterpreting the task), note the correct behavior in the REASONING section and explicitly state the correct action to take next time.
-
-6. **Avoid redundancy and verbosity.** Do not repeat full API responses, long error messages, or duplicated documentation. Summarize each unique action once. If the same operation is repeated multiple times, note that a loop or batch approach should be used to reduce steps.
-
-7. **Preserve all state variables and artifacts.** List every variable, file path, directory, or object that is created, modified, or still needed. If a variable is lost or missing, state that it must be re-acquired and how.
-
-8. **Do not include speculative or inferred facts.** Only include information that is directly present in the history or previous summary. If something is unknown, say "unknown" rather than guessing.
-
-9. **Keep the summary compact.** Use bullet points and short phrases. Do not exceed 200 words unless absolutely necessary for completeness. Every sentence must carry factual weight.
-
-10. **Flag efficiency regressions.** If the history shows redundant steps, repeated API calls, or unnecessary re-fetching of information, note the inefficiency and recommend a more efficient approach (e.g., loops, batching, caching) in the REASONING section.
-
----
-
-## REDUNDANCY ELIMINATION RULES (apply strictly, in addition to the above)
-
-1. **Merge REASONING and COMPLETED sections.** Do not repeat the same fact, conclusion, or data list in both sections. Consolidate into a single chronological narrative in REASONING; use COMPLETED only for a minimal checklist of finished items not already implied by the narrative.
-
-2. **State the task description exactly once.** Place it at the top of REASONING. Do not restate it in COMPLETED or Next Steps.
-
-3. **Store each credential, token, and ID exactly once.** If a token or ID appears in multiple sections, keep it only in the section where it is first used or in a single "Critical References" line. Reference it by variable name (e.g., `<token>`) elsewhere.
-
-4. **Drop completed login and exploration steps.** Once authentication is achieved and relevant APIs are identified, do not repeat login details, API doc lookups, or lists of explored apps/APIs. Only mention credentials if re-authentication may be needed in the next session.
-
-5. **Drop full API response payloads.** Do not include raw JSON, full song/playlist/album lists, or transaction descriptions. Include only derived facts: counts, IDs, names, and final results.
-
-6. **Condense multi-step plans into a single sentence or short bullet list.** Replace verbose numbered steps with a concise algorithmic description (e.g., "For each song_id, call `show_song`; sum durations; identify max").
-
-7. **Remove meta-commentary.** Drop statements about past errors, syntax issues, "no errors encountered," or "explored docs" unless they change future behavior.
-
-8. **Remove speculative or alternative paths.** Once a clear path is identified, drop mentions of rejected APIs or hypothetical next steps.
-
-9. **Keep only the immediate next action.** In Next Steps, list only the next concrete action(s) and the final `complete_task()` call. Do not restate the full plan or task context.
-
-10. **Use compact formatting.** Prefer single-line summaries for lists (e.g., "song_ids: [37-43]") and short imperative bullets for next steps.
-
----
-
-### [Output Format]
-
-Do **not** include the input or any additional explanation. Only return the formatted summary.
+Output EXACTLY the following structure---nothing more:
+<HISTORY_SUMMARY>
+1. REASONING
+One brief paragraph on key progress and rationale.
+2. VARS
+key=value pairs, comma-separated; only still-needed runtime values.
+3. TODO
+Bulleted next actions (<=5).
+4. COMPLETED
+Bulleted finished subtasks (<=5).
+5. GUARDRAILS
+Single concise bullet, or omit if none.
+Return only the <HISTORY_SUMMARY> block---no additional commentary or input echoes.

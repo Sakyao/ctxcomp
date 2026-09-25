@@ -41,16 +41,18 @@ lines (section 4.2 has one subsection per axis):
 
 ```
 history      h'_t = f(h_t; P_hist)          if |h_t| > T_hist      T_hist = 4096
-observation  o'_t = f(o_t, h_{t-1}; P_obs)  if |o_t| > T_obs       T_obs  = 256
+observation  o'_t = f(o_t, h_{t-1}; P_obs)  if |o_t| > T_obs       T_obs  = 1024
 ```
 
 They differ in input, in output shape, in threshold, and in the prompt being
 optimised: `P_hist` and `P_obs` are learned separately. The axis is a property of
 the **row** (`kind: history | obs`), not a suffix on a method's name.
 
-`T_obs = 256`, not 1024. An earlier draft of this repository clamped observations at
-1024; the code this suite drives clamps at 256, and a row has to be measured at the
-setting it will be compared under.
+`T_hist = 4096` and `T_obs = 1024`, both as paper Appendix B.3 states them for
+AppWorld. Upstream's own config generator writes **256** on the observation axis --
+four times more aggressive -- and these rows deliberately do not inherit that: a row
+has to be measured at the setting it is compared under. The divergence is recorded in
+`methods.yml` and `docs/CREDITS.md`.
 
 What the observation axis is *not*: it is not "drop old observations". By equation
 (4) it compresses the **current** observation when that observation alone is too
@@ -70,13 +72,16 @@ reference which needs none.
 | Prompting-H | `hist_prompting_h` | `obs_prompting_h` | Hermes structured checkpoint |
 | TRACE | `hist_trace` | `obs_trace` | verifier-optimised template |
 | ACON-UT | `hist_acon_ut` | `obs_acon_ut` | ACON utility-optimised guideline |
-| ACON-UT+CO | `hist_acon_utco` | `obs_acon_utco`* | ACON utility+compression guideline |
+| ACON-UT+CO | `hist_acon_utco` | `obs_acon_utco` | ACON utility+compression guideline |
 
 `no_compression` is not split: it compresses nothing, so the axis does not apply.
 
-\* `obs_acon_utco` has no observation template — the local optimiser only ever
-produced a history guideline — so `make_configs.py` refuses the row rather than
-substituting a default.
+All four ACON rows carry the **published** guidelines from the paper's Appendix E --
+Prompt E.6/E.7 for history, E.9/E.10 for observation -- rather than candidates from a
+local optimiser run. The paper also prints the unoptimised starting points (E.5, E.8),
+kept under `prompts/acon_base/` so the before/after difference is readable without the
+paper. Full provenance, including the sha256 of the superseded local candidates, is in
+`docs/CREDITS.md`.
 
 `obs_fifo` is deliberately absent. ACON's observation axis truncates a *single*
 over-long observation, and upstream implements no non-LLM way to do that. The row

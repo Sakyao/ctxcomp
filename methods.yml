@@ -43,15 +43,20 @@
 # over observations is a different method and is listed under "not run" below.
 #
 # ---------------------------------------------------------------------------
-# Thresholds
+# Thresholds -- and a divergence between the paper and the code that ships it
 # ---------------------------------------------------------------------------
-# T_hist = 4096 and T_obs = 256, both hard-coded in make_configs.py exactly as
-# upstream has them.
+# Paper Appendix B.3: "For history compression, we set T_hist = 4096 for AppWorld
+# and OfficeBench, and 2048 for 8-objective QA ... For observation compression, we
+# set T_obs = 1024 for AppWorld, 512 for OfficeBench, and 400 for 8-objective QA."
 #
-# T_obs is 256 -- NOT the 1024 an earlier draft of this repository used. The paper's
-# analysis section discusses medium thresholds and names 4096, but the code this
-# suite drives clamps observations at 256, and a row has to be measured at the
-# setting it will be compared under.
+# Upstream's generator (experiments/suite/make_configs.py) hard-codes 256 for the
+# observation axis -- four times more aggressive than the paper states. The two are
+# not compatible: an observation row at 256 fires far more often than the same row at
+# 1024, so its Acc and its Peak are not the quantities the paper tabulates.
+#
+# These rows use the PAPER's values (T_hist = 4096, T_obs = 1024), set in
+# make_configs.py, because the purpose of this table is to be read against the paper.
+# The 256 lives on in the upstream file and, where it matters, is noted per row.
 #
 # ---------------------------------------------------------------------------
 # Metric definitions (ACON paper Table 1)
@@ -186,26 +191,28 @@ rows:
     kind: history
     ctxopt: {prompt_dir: prompts/acon_ut, system: system, history: history}
     source: >
-      ACON utility-optimised history guideline. Prompts: ported from this machine's
-      `prompt_optimizer/outputs/ut1/improved_history_prompt_samples_*`. NOTE: this is
-      a local UT optimiser run on the AppWorld train split, not the guideline the
-      ACON authors shipped -- UT/CO output depends on the trajectories and on the
-      agent prompt it was optimised against, so two faithful reproductions of the
-      method produce two different texts. Record the guideline sha256 with any
-      result.
+      ACON-UT P_hist: the utility-optimised history guideline, ported verbatim from
+      paper Appendix E, "Prompt E.6: AppWorld Prompt for history compression after
+      optimization (UT)". An earlier state of this row used a candidate from the local
+      optimiser run (`prompt_optimizer/outputs/ut1/...`), which never went through the
+      paper's selection stage; the published guideline is both the object the method
+      is defined by and the one a table compared against the paper should carry. The
+      starting point it was optimised from (Prompt E.5) is at
+      prompts/acon_base/history.jinja, and the superseded local candidates are
+      archived under prompts/_superseded/ with their sha256 in docs/CREDITS.md.
 
   - name: hist_acon_utco
     label: ACON-UT+CO
     kind: history
     ctxopt: {prompt_dir: prompts/acon_utco, system: system, history: history}
     source: >
-      ACON utility+compression-optimised history guideline: stage 1 (utility)
-      maximises success rate, stage 2 (compression) shortens the guideline on the
-      tasks that already succeed, writing `length_optimized_history_prompt_*`.
-      Prompts: ported, byte-identical to
-      `prompt_optimizer/outputs/co1/optimized_prompts/length_optimized_history_prompt_0.jinja`.
-      Upstream's manifest says this row is absent; it became available once the co1
-      stage was run here.
+      ACON-UT+CO P_hist: the utility+compression-optimised history guideline, ported
+      verbatim from paper Appendix E, "Prompt E.7: AppWorld Prompt for history
+      compression after optimization (UTCO)". Stage 1 (UT) maximises success rate;
+      stage 2 (CO) shortens the guideline on the tasks that already succeed. This row
+      previously used a local co1 candidate that had not been through selection; the
+      paper carries the published guideline, so measuring the method as defined needs
+      no optimiser re-run.
 
   # -------------------------------------------------------- observation axis
   - name: obs_llmlingua
@@ -256,24 +263,24 @@ rows:
     kind: obs
     ctxopt: {prompt_dir: prompts/acon_ut, system: system, obs: obs}
     source: >
-      ACON's own P_obs template, whose input is (task, prior history, current
-      observation) and whose output is a "Refined Observation" -- distinguishable
-      from P_hist, which takes (task, previous summary, history) and emits a
-      structured checkpoint. Prompts: ported, byte-identical in body to
-      `experiments/appworld/prompts/context_opt/prompt_user.jinja`. Caveat: our
-      local optimiser only ever produced a history guideline, so this row uses the
-      shipped P_obs rather than an optimised observation guideline.
+      ACON-UT P_obs: the optimised observation guideline, ported verbatim from paper
+      Appendix E, "Prompt E.9: AppWorld Prompt for observation compression after
+      optimization (UT)". Its input is (task, prior history, current observation) and
+      its output is a "Refined Observation" -- distinguishable from P_hist, which
+      takes (task, previous summary, history) and emits a structured checkpoint. The
+      unoptimised counterpart (Prompt E.8) is kept at prompts/acon_base/obs.jinja so
+      the two can be diffed without the paper.
 
   - name: obs_acon_utco
     label: ACON-UT+CO (obs)
     kind: obs
     ctxopt: {prompt_dir: prompts/acon_utco, system: system, obs: obs}
     source: >
-      Would need the joint UT+CO optimiser run on the observation objective
-      (upstream: experiments/prompt_optimizer/
-      unified_compress_update_observation_prompt.py). Never run, and
-      prompts/acon_utco/ ships no observation template, so make_configs.py refuses
-      the row instead of quietly substituting a default.
+      ACON-UT+CO P_obs: the compression-optimised observation guideline, ported
+      verbatim from paper Appendix E, "Prompt E.10: AppWorld Prompt for observation
+      compression after optimization (UTCO)". This row used to be refused by
+      make_configs.py for want of an observation guideline for the CO stage; the
+      paper carries one, so the row runs.
 
 # Rows deliberately NOT run, and why:
 #

@@ -15,14 +15,14 @@ executed by that baseline's own implementation inside the ACON checkout.
 | `hist_prompting_o` | history | OpenClaw two-stage checkpoint (first / update) | ported |
 | `hist_prompting_h` | history | Hermes structured checkpoint + reference-only note | ported |
 | `hist_trace` | history | TRACE verifier-optimised checkpoint template | ported |
-| `hist_acon_ut` | history | ACON utility-optimised guideline (`ut1`) | ported |
-| `hist_acon_utco` | history | ACON utility+compression-optimised guideline (`co1`) | ported |
+| `hist_acon_ut` | history | ACON utility-optimised guideline (paper E.6) | ported |
+| `hist_acon_utco` | history | ACON utility+compression-optimised guideline (paper E.7) | ported |
 | `obs_llmlingua` | observation | same pruner, on the current observation | — |
 | `obs_prompting_o` | observation | OpenClaw criteria applied to one observation | **derived** |
 | `obs_prompting_h` | observation | Hermes criteria applied to one observation | **derived** |
 | `obs_trace` | observation | TRACE criteria applied to one observation | **derived** |
 | `obs_acon_ut` | observation | ACON's own `P_obs` | ported |
-| `obs_acon_utco` | observation | would need a CO run on the observation objective | absent |
+| `obs_acon_utco` | observation | ACON utility+compression-optimised `P_obs` (paper E.10) | ported |
 
 `no_compression` has no axis: it compresses nothing, so both axes are compared
 against this one row. `obs_fifo` is not run — see the end of `methods.yml`.
@@ -40,17 +40,18 @@ stages:
   execution actually used, so the checkpoint can be shortened without giving back
   success rate. Output files are prefixed `length_optimized_history_prompt_`.
 
-`hist_acon_ut` is this machine's `ut1` run; `hist_acon_utco` is `co1`, byte-identical
-to `co1/optimized_prompts/length_optimized_history_prompt_0.jinja`. **Neither is the
-guideline the ACON authors shipped**, and neither can be: UT/CO output depends on the
-trajectories and on the agent prompt it was optimised against, so two faithful
-reproductions of the method produce two different texts and therefore two different
-rows. Report the guideline's sha256 with any result, so that two papers using the
-same method name are not mistaken for the same row.
+All four ACON rows carry the **published** guidelines from the paper's Appendix E --
+Prompt E.6/E.7 for history, E.9/E.10 for observation -- reproduced verbatim. The
+unoptimised starting points, E.5 and E.8, are under `prompts/acon_base/`, so the
+before/after difference can be read without the paper.
 
-`obs_acon_utco` needs a CO run on the observation objective, which has never been
-run here, so the row has no template and `make_configs.py` refuses it rather than
-substituting a default.
+An earlier state of this repository used candidates from a local optimiser run
+(`ut1`, `co1`). Those had never been through the stage the paper describes -- "sample
+5 candidate prompts and select the one that performs best on a subset of the training
+set" -- so they were not the method; `ut1`'s stage 3 was interrupted after one of five
+candidates and never produced a winner. They are archived under `prompts/_superseded/`
+with their sha256 in `docs/CREDITS.md` rather than deleted, so the substitution is
+auditable.
 
 ## The two axes
 
@@ -59,7 +60,7 @@ substituting a default.
 | equation | (3) `h'_t = f(h_t; P_hist)` | (4) `o'_t = f(o_t, h_{t-1}; P_obs)` |
 | fires on | the accumulated history | the **current** observation |
 | fires when | `|h_t| > T_hist` | `|o_t| > T_obs` |
-| threshold | 4096 | 256 |
+| threshold | 4096 | 1024 |
 | prompt input | `(task, prev_summary, history)` | `(task, history, observation)` |
 | prompt output | a structured checkpoint | a refined observation |
 

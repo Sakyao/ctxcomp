@@ -33,6 +33,11 @@ CONFIGS = SUITE / "configs"
 COMPOSED_TWO_STAGE: list[str] = []
 
 HISTORY_THRESHOLD = 4096
+# Paper Appendix B.3: "For history compression, we set T_hist = 4096 for AppWorld and
+# OfficeBench ... For observation compression, we set T_obs = 1024 for AppWorld, 512
+# for OfficeBench, and 400 for 8-objective QA." Upstream's generator hard-codes 256 for
+# this axis instead, i.e. four times more aggressive than the paper.
+OBSERVATION_THRESHOLD = 1024
 
 
 def load_methods() -> dict:
@@ -132,8 +137,12 @@ def build_row(row: dict, meta: dict) -> dict | None:
         "model": meta["model"],
         "compressor_type": "full",
         "prompts": prompts,
+        # Thresholds as the paper states them rather than as upstream's generator
+        # hard-codes them (it writes 256 on the observation axis); see the note at the
+        # top of methods.yml. A row has to be measured at the setting it is compared
+        # under, so the divergence is recorded rather than inherited.
         f"{kind_prefix}_summarization_threshold": (
-            HISTORY_THRESHOLD if kind_prefix == "history" else 256
+            HISTORY_THRESHOLD if kind_prefix == "history" else OBSERVATION_THRESHOLD
         ),
         f"{kind_prefix}_summary_rule": "reset",
         f"{kind_prefix}_prompt_dir": str(out_prompts),

@@ -1,0 +1,41 @@
+{#-
+  ACON-UT+CO P_obs -- paper Appendix E, "Prompt E.10: AppWorld Prompt for observation
+  compression after optimization (UTCO)" (arXiv 2510.00615).
+
+  Reproduced verbatim: PDF line breaks rejoined, page numbers removed. This template
+  is why obs_acon_utco is a row at all: the earlier state of this repository had no
+  observation guideline for the CO stage and refused the row as a result.
+
+  Variables rendered by the harness (obs_optimizer.py::_build_optimization_prompt):
+    task         the user instruction
+    history      the interaction history before the current observation
+    observation  the current observation, the thing being compressed
+-#}
+Your task: create two sections---"Reasoning" and "Refined Observation".
+1. Reasoning (<=40 words)
+- Briefly state what was kept and why; note dropped categories and any pagination needs.
+2. Refined Observation (use ONLY the current observation)
+- Keep strictly necessary data for the next step.
+- Always preserve, when present:
+- access_token or other auth values
+- page_limit, page_index and other defaults that affect calls
+- every endpoint name; include parameters only if required; description <= 4 words
+- identifiers/fields needed for comparisons, loops, or API calls (ids, titles, counts, paths, etc.)
+- Minimise length:
+- Delete unused fields and narrative text.
+- Compress JSON/arrays (one object per line, no extra spaces).
+- Summarise long uniform lists with a range/pattern when individual rows are not needed.
+- Never invent, alter, or omit a required literal.
+- Exclude history, prior summaries, and meta comments.
+[Information source]
+# User Instruction
+{{ task }}
+# History of interactions
+{{ history }}
+# Observation at the current time step
+{{ observation }}
+[Output format]
+# Reasoning
+...
+# Refined Observation
+...

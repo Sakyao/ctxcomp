@@ -42,6 +42,44 @@ The executables this suite drives -- `productive_agents.ctxopt`, `agents.memory`
 `agents.unified_agent`, `experiments/appworld/run_all.py` -- belong to
 `microsoft/acon` (MIT), at `d63f9ae` with the local edits listed in `patches/`.
 
+## Where the ACON guidelines come from
+
+The four ACON rows carry the **published** guidelines, not a local optimiser run. The
+paper's Appendix E prints the guideline for each axis at each stage, and those are the
+objects the method is defined by:
+
+| row | paper prompt | file |
+|---|---|---|
+| `hist_acon_ut` | E.6 — history after optimization (UT) | `prompts/acon_ut/history.jinja` |
+| `hist_acon_utco` | E.7 — history after optimization (UTCO) | `prompts/acon_utco/history.jinja` |
+| `obs_acon_ut` | E.9 — observation after optimization (UT) | `prompts/acon_ut/obs.jinja` |
+| `obs_acon_utco` | E.10 — observation after optimization (UTCO) | `prompts/acon_utco/obs.jinja` |
+| *(reference)* | E.5 — history before optimization | `prompts/acon_base/history.jinja` |
+| *(reference)* | E.8 — observation before optimization | `prompts/acon_base/obs.jinja` |
+
+Reproduced verbatim: PDF line breaks rejoined, page numbers and headers removed,
+nothing paraphrased. Appendix E.1–E.4 are the optimiser's own analysis and update
+prompts — machinery, not guidelines — and are not used here.
+
+**Superseded local artefacts.** An earlier state of this repository used candidates
+from a local optimiser run. Those candidates had never been through the stage the
+paper describes ("sample 5 candidate prompts and select the one that performs best on
+a subset of the training set"), so they were not the method. They are archived rather
+than deleted, so the substitution is auditable:
+
+| file | sha256 |
+|---|---|
+| `prompts/_superseded/ut1_sample0_history.jinja` | `62f6b1769c4cd1cb9fc9694a0fd038c3e2acea414f97167650ff5f51e03ae7d6` |
+| `prompts/_superseded/co1_sample0_history.jinja` | `ff5239127bf8aadedad55769590c591766c0df08c9c576c27992b37973d3bf81` |
+
+### A divergence between the paper and the code it ships with
+
+Paper Appendix B.3 sets `T_hist = 4096` and `T_obs = 1024` for AppWorld. Upstream's
+own config generator hard-codes **256** on the observation axis — four times more
+aggressive. These rows use the paper's values (see the note at the top of
+`methods.yml`), because the table is meant to be read against the paper. Anything
+measured at 256 is a different measurement and must not be averaged into this one.
+
 ## What is not reproduced
 
 The baselines that the two source papers train -- AgentFold, Context-Folding, MEM1,
