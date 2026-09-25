@@ -83,14 +83,15 @@
 benchmark: appworld
 split: test_normal
 
-# The model id the endpoint ACTUALLY serves, not the name of the weights behind it.
-# This one is a LABEL the server validates: an id it has not loaded is rejected, and
-# nothing in the request reveals which weights answered. Check before every round --
-#     curl -s $ACON_VLLM_BASE_URL/models -H "Authorization: Bearer $ACON_VLLM_API_KEY"
-# -- because this endpoint has been redeployed mid-experiment before, under a
-# different name and with different weights, which is why run_suite.sh fingerprints
-# it before and after each row. On 2026-09-25 it served `deepseek-v4-flash`.
-model: deepseek-v4-flash
+# The model id the endpoint serves. This is a LABEL the server validates: an id it has
+# not loaded is rejected, and nothing in the request reveals which weights answered.
+# It is a hint rather than a setting -- run_suite.sh probes /v1/models before every
+# round and adopts whatever the deployment actually answers to, so a redeploy cannot
+# turn a round into a wall of 404s. When the two disagree, the run id carries the id
+# that was really used. This deployment has changed ids four times in two days
+# (deepseek-v4-flash <-> deepseek-v4.1-flash), which is why the value below is not
+# trusted. It is also why every row is fingerprinted before and after it runs.
+model: deepseek-v4.1-flash
 
 # Agent prompt. MUST stay the answer-fixed variant: with the stock prompt the agent
 # answers non-questions ("Done.") and fails AppWorld's answer assertion, which

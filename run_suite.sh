@@ -92,6 +92,28 @@ MODEL="$1"; SPLIT="$2"; DEF_ITER="$3"; DEF_REP="$4"; AGENT_PROMPT="$5"
 [ -n "$STAMP" ] || STAMP="$(date '+%Y%m%d_%H%M%S')"
 [ -n "$SHARDS" ] || SHARDS=16
 
+# The id the endpoint will actually answer to. A server rejects names it has not
+# loaded, so a manifest that disagrees with the deployment fails every request in the
+# round -- and this deployment has changed ids more than once (V4-Flash -> V4.1-Flash
+# -> V4-Flash -> V4.1-Flash inside two days). Probe it and adopt it; the substitution
+# shows up in the run id, so it is recorded rather than buried in a log.
+SERVED="$("$PY" - "$ACON_VLLM_BASE_URL" "$ACON_VLLM_API_KEY" <<'PY'
+import json, sys, urllib.request
+url, key = sys.argv[1], sys.argv[2]
+try:
+    req = urllib.request.Request(url.rstrip("/") + "/models",
+                                 headers={"Authorization": "Bearer " + key})
+    data = json.loads(urllib.request.urlopen(req, timeout=15).read())
+    print(data["data"][0]["id"] if data.get("data") else "")
+except Exception:
+    print("")
+PY
+)"
+if [ -n "$SERVED" ] && [ "$SERVED" != "$MODEL" ]; then
+  echo "[suite] endpoint serves '$SERVED'; manifest says '$MODEL' -> using '$SERVED'"
+  MODEL="$SERVED"
+fi
+
 rows() {
   "$PY" - "$MAN" "$HERE" <<'PY'
 import sys, yaml, pathlib
