@@ -23,6 +23,45 @@ ships an observation-level prompt. They are different objects of study from the
 published methods they are attached to; `methods.yml` says `DERIVED` in each row's
 `source:`.
 
+## OpenClaw and Hermes (`prompting_o`, `prompting_h`)
+
+Both are ported, and both were re-checked against upstream after the fact rather than
+trusted from memory. The TRACE paper's Appendix A prints their prompts in full and
+footnotes the exact source files, and those files were fetched and compared:
+
+| row | upstream file | commit | result |
+|---|---|---|---|
+| `prompting_o` | `openclaw/openclaw`, `packages/agent-core/src/harness/compaction/compaction.ts` | `0e7b5c3` | `system`, `first`, `update` — byte-identical |
+| `prompting_h` | `NousResearch/hermes-agent`, `agent/context_compressor.py` | `cca3b77` | `first`, `update`, `prefix` — byte-identical |
+
+Prompt assembly matches too. OpenClaw emits `<conversation>…</conversation>`, then
+`<previous-summary>…</previous-summary>` **only when a previous summary exists**, then
+the first- or the update-prompt (`compaction.ts:562-572`); `make_configs.py` composes
+those same two branches into a single template. Hermes prepends `_summarizer_preamble`
+to both branches and switches body on `self._previous_summary`
+(`context_compressor.py:1392-1410`).
+
+### One deliberate correction
+
+`prompts/hermes/system.jinja` was **not** upstream text in an earlier state of this
+repository. It carried a rewritten preamble, and it asked the summariser to emit the
+`[CONTEXT COMPACTION — REFERENCE ONLY]` handoff note itself. Upstream never asks the
+model for that note: `ContextCompressor._with_summary_prefix`
+(`context_compressor.py:1581`) prepends the constant in code, stripping it first if the
+model produced it anyway. The rewritten preamble had also silently dropped two upstream
+instructions (keep the user's language; `[REDACTED]` for credentials).
+
+Both are now aligned: `system.jinja` is the upstream `_summarizer_preamble` verbatim,
+and the handoff note is prepended by the harness at injection time — a `[LOCAL PATCH]`
+in `agents/memory.py`, listed in `patches/`. Rows whose prompt directory ships no
+`prefix.jinja` (OpenClaw, TRACE, ACON) take the `None` branch and render exactly as
+before; that was verified by comparing the rendered prompt rather than assumed.
+
+One place this suite knowingly departs from upstream: Hermes summarises with an
+auxiliary cheap model (its own docstring: *"Uses auxiliary model (cheap/fast) to
+summarize middle turns"*), whereas TRACE and this suite both summarise with the agent's
+own model — which is what the comparison target does.
+
 ## TRACE
 
 The template used here is `candidate_1` from the TRACE repository

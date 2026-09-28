@@ -103,12 +103,20 @@ model: deepseek-v4.1-flash
 # `./prompts/prompts_v1_answerfix.json`, which is what is used here.
 prompt_file: ./prompts/prompts_v1_answerfix.json
 
-# Interaction budget per task. AppWorld's own default is 1000; upstream ACON
-# hard-codes 50 in four places, which is 1/20 of the environment's own default.
-# Under a 50 budget a task that hits the cap always fails, so the row score
-# collapses to ~1 - (cap-hit rate) and the ranking measures step efficiency rather
-# than context fidelity. Rows are only comparable at equal max_iter.
-max_iter: 1000
+# Interaction budget per task. AppWorld's own default is 1000, but 50 is what both
+# reference papers use, so 50 is the only value at which these rows are comparable to
+# theirs: TRACE says it outright ("cap each agent rollout at 50 steps", sect. 5.1), and
+# the ACON checkout hard-codes 50 in four places (run.py:62, configs/base_config.yaml:8,
+# unified_agent.py:302). A row measured at 1000 is not comparable -- the agent keeps
+# retrying past step 50, which inflates Steps and Dep. (measured on no_compression:
+# 23.21 vs the paper's 16.14 steps) and turns a losing method's inefficiency into a
+# multi-hour tail instead of a capped failure.
+#
+# The trade-off to keep in mind: at 50, a task that exhausts the budget fails by
+# construction, so every score carries a ~1 - (cap-hit rate) component. Compare rows
+# only at equal max_iter, and read the `cap N/M hit max_iter` line in the run log
+# before attributing a gap to the compressor itself.
+max_iter: 50
 
 # Independent runs per task. 1 gives Acc/Easy/Medium/Hard/Steps/Peak/Dep.
 # 2 additionally gives Pass^2/Pass@2, at double the cost.

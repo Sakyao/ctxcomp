@@ -25,6 +25,7 @@ Every hunk is marked `[LOCAL PATCH]` in the source, so an audit of the reading
 | `src/productive_agents/subtrate_api.py` (+38/−2) | added `_LocalEmbeddingClient`, an OpenAI-compatible embeddings client. Upstream talks to Azure only, so with a local endpoint the **Retrieval baseline could not run at all**. | load-bearing for `*_retrieval` |
 | `src/productive_agents/ctxopt/history_optimizer.py` (+91/−20) | embedding cache re-keyed from position to content, plus the candidate-pool de-duplication. A positional cache is only valid while the pool grows by appending; de-duplication shortens it. | correctness of the retrieval baseline |
 | `src/productive_agents/agents/memory.py` (+11/−4) | retrieval selection by embedding similarity rather than a recency window. | makes the row mean what its name says |
+| `src/productive_agents/agents/memory.py` (+23/−0) | prepend a method's handoff note (`prefix.jinja`) in code, as Hermes upstream does in `ContextCompressor._with_summary_prefix`, instead of asking the summariser to emit it. Gated on the row's prompt directory shipping that file, so OpenClaw / TRACE / ACON render unchanged. | method fidelity for `prompting_h` |
 | `experiments/appworld/run_all.py` (+8/−1) | expose `--prompt_file`. Upstream hard-coded `./prompts/prompts_v1.json`. The default is **byte-identical** to upstream, so omitting the flag reproduces stock behaviour exactly. | needed to select the answer-fixed prompt |
 
 ### Why these are not simply reverted

@@ -38,6 +38,24 @@ class MemoryManager:
         # - accumulate: accumulate the history summaries
         # - reset: reset the history summary after each optimization
         self.history_summary_rule = co_config.get("history_summary_rule", "accumulate") if co_config else "accumulate"  # Rule for history summarization
+
+        # [LOCAL PATCH] Hermes ships its handoff note as a separate artefact
+        # (`prefix.jinja`) and upstream prepends it in code -- hermes-agent@cca3b77,
+        # `ContextCompressor._with_summary_prefix`:
+        #     return f"{SUMMARY_PREFIX}\n{text}" if text else SUMMARY_PREFIX
+        # Asking the summariser to emit that note itself changes the object of study:
+        # the handoff marker would be model-generated instead of a fixed constant that
+        # the loop controls. Load it here and prepend it at injection time instead.
+        # Rows whose prompt directory has no prefix.jinja (OpenClaw, TRACE, ACON) are
+        # untouched: their `history_summary_prefix` stays None and the rendered prompt
+        # is byte-identical to before.
+        self.history_summary_prefix = None
+        _prompt_dir = co_config.get("history_prompt_dir") if co_config else None
+        if _prompt_dir:
+            _prefix_path = os.path.join(_prompt_dir, "prefix.jinja")
+            if os.path.exists(_prefix_path):
+                with open(_prefix_path, encoding="utf-8") as _prefix_file:
+                    self.history_summary_prefix = _prefix_file.read().strip()
         # baseline strategy:
         # - none: just use history optimizer
         # - discard: discard the previous turns and only keep the last k turns
@@ -440,6 +458,11 @@ class MemoryManager:
                     raw_history=history_for_summarization,
                     # opt_args=opt_args,
                 )
+                # [LOCAL PATCH] prepend the method's handoff note when it ships one
+                # (Hermes does; see the note in __init__). Upstream composes this in
+                # code as well, so this matches upstream rather than diverging.
+                if self.history_summary_prefix:
+                    optimized_history = self.history_summary_prefix + "\n" + optimized_history
                 #### TODO: This results in the accumulation of history summaries.
                 # We should not accumulate history summaries, but rather replace the previous one.
                 if self.history_summary_rule == "reset":
