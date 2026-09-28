@@ -22,7 +22,16 @@
 #   bash run_suite.sh
 #   bash run_suite.sh --methods hist_trace,hist_fifo --max-iter 300 --shards 16
 #   bash run_suite.sh --methods obs_trace --task-ids 3d9a636_1 --max-iter 3 --stamp smoke
+#   bash run_suite.sh --methods no_compression,hist_prompting_o,hist_trace \
+#        --prompt-file ./prompts/prompts_v1.json --stamp stock1
 #   bash run_suite.sh --dry-run
+#
+# --prompt-file overrides the manifest's prompt_file for this round only. The manifest
+# points at the answer-fixed agent prompt, which adds a worked example teaching the
+# agent that a command is not a question (AppWorld grades the `complete_task` answer,
+# so without it the agent answers "Done." and fails the assertion). Any comparison
+# against a setup that ran the stock prompt needs to reach it without editing the
+# manifest -- editing it is what caused the stale-configs incident on 2026-09-25.
 #
 # --task-ids is the single-task path: one row, one task, the same run_all.py call the
 # shard loop makes, for checking that a change still runs end to end without
@@ -62,16 +71,18 @@ export ACON_LLM_BACKOFF="${ACON_LLM_BACKOFF:-1.5}"
 if [ ! -e "$EXP/data" ]; then ln -s "$AW/data" "$EXP/data"; fi
 
 STAMP=""; FILTER=""; SHARDS=""; MAX_ITER=""; REPEATS=""; TASK_IDS=""; DRY=0
+PROMPT_FILE=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --stamp)    STAMP="$2"; shift 2 ;;
-    --methods)  FILTER="$2"; shift 2 ;;
-    --shards)   SHARDS="$2"; shift 2 ;;
-    --max-iter) MAX_ITER="$2"; shift 2 ;;
-    --repeats)  REPEATS="$2"; shift 2 ;;
-    --task-ids) TASK_IDS="$2"; shift 2 ;;
-    --dry-run)  DRY=1; shift ;;
-    -h|--help)  sed -n '2,28p' "$0"; exit 0 ;;
+    --stamp)       STAMP="$2"; shift 2 ;;
+    --methods)     FILTER="$2"; shift 2 ;;
+    --shards)      SHARDS="$2"; shift 2 ;;
+    --max-iter)    MAX_ITER="$2"; shift 2 ;;
+    --repeats)     REPEATS="$2"; shift 2 ;;
+    --task-ids)    TASK_IDS="$2"; shift 2 ;;
+    --prompt-file) PROMPT_FILE="$2"; shift 2 ;;
+    --dry-run)     DRY=1; shift ;;
+    -h|--help)     sed -n '2,28p' "$0"; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -89,6 +100,9 @@ PY
 MODEL="$1"; SPLIT="$2"; DEF_ITER="$3"; DEF_REP="$4"; AGENT_PROMPT="$5"
 [ -n "$MAX_ITER" ] || MAX_ITER="$DEF_ITER"
 [ -n "$REPEATS" ] || REPEATS="$DEF_REP"
+# --prompt-file wins over the manifest for this round only (see the note at the top).
+[ -n "$PROMPT_FILE" ] || PROMPT_FILE="$AGENT_PROMPT"
+AGENT_PROMPT="$PROMPT_FILE"
 [ -n "$STAMP" ] || STAMP="$(date '+%Y%m%d_%H%M%S')"
 [ -n "$SHARDS" ] || SHARDS=16
 
@@ -156,6 +170,10 @@ PY
 }
 
 echo "[suite $STAMP] model=$MODEL split=$SPLIT shards=$SHARDS max_iter=$MAX_ITER repeats=$REPEATS"
+# Printed because it is the one input that changes results without changing the run id:
+# a stamp that used the stock prompt and one that used the answer-fixed prompt produce
+# differently-named runs only by convention (--stamp), never by the id itself.
+echo "[suite $STAMP] agent prompt: $AGENT_PROMPT"
 SIG="$(sig)"
 echo "[suite $STAMP] serving backbone signature: $SIG"
 
